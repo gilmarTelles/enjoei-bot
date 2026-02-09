@@ -5,7 +5,7 @@ let browser = null;
 async function launchBrowser() {
   if (browser && browser.connected) return browser;
 
-  browser = await puppeteer.launch({
+  const launchOptions = {
     headless: true,
     timeout: 60000,
     protocolTimeout: 60000,
@@ -23,7 +23,13 @@ async function launchBrowser() {
       '--single-process',
       '--no-zygote',
     ],
-  });
+  };
+
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  browser = await puppeteer.launch(launchOptions);
 
   browser.on('disconnected', () => {
     browser = null;
