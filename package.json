@@ -1,0 +1,17 @@
+{
+  "name": "enjoei-whatsapp-bot",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "description": "Enjoei WhatsApp alert bot - scrapes enjoei.com.br and sends WhatsApp alerts for keyword matches",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.2.4",
+    "node-cron": "^4.2.1",
+    "puppeteer": "^24.37.2",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.6"
+  }
+}
