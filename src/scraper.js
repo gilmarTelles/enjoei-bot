@@ -7,11 +7,21 @@ async function launchBrowser() {
 
   browser = await puppeteer.launch({
     headless: true,
+    timeout: 60000,
+    protocolTimeout: 60000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--disable-sync',
+      '--disable-translate',
+      '--no-first-run',
+      '--single-process',
+      '--no-zygote',
     ],
   });
 
@@ -35,7 +45,7 @@ async function searchProducts(keyword) {
     const encoded = encodeURIComponent(keyword);
     await page.goto(`https://www.enjoei.com.br/s?q=${encoded}`, {
       waitUntil: 'networkidle2',
-      timeout: 30000,
+      timeout: 60000,
     });
 
     // Wait for product cards to render
