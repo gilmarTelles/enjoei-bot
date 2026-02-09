@@ -1,56 +1,33 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const path = require('path');
+const twilio = require('twilio');
 
-const client = new Client({
-  authStrategy: new LocalAuth({
-    dataPath: path.join(__dirname, '..', '.wwebjs_auth'),
-  }),
-  puppeteer: {
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
-  },
-});
+let client;
+let fromNumber;
 
-function start() {
-  return new Promise((resolve, reject) => {
-    client.on('qr', (qr) => {
-      console.log('[whatsapp] Scan the QR code below to log in:');
-      qrcode.generate(qr, { small: true });
-    });
+function init() {
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER } = process.env;
 
-    client.on('authenticated', () => {
-      console.log('[whatsapp] Authenticated');
-    });
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_WHATSAPP_NUMBER) {
+    throw new Error('Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_WHATSAPP_NUMBER in .env');
+  }
 
-    client.on('auth_failure', (msg) => {
-      console.error('[whatsapp] Auth failure:', msg);
-      reject(new Error(`Auth failure: ${msg}`));
-    });
+  client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+  fromNumber = TWILIO_WHATSAPP_NUMBER.startsWith('whatsapp:')
+    ? TWILIO_WHATSAPP_NUMBER
+    : `whatsapp:${TWILIO_WHATSAPP_NUMBER}`;
 
-    client.on('ready', () => {
-      console.log('[whatsapp] Client is ready');
-      resolve();
-    });
-
-    client.on('disconnected', (reason) => {
-      console.warn('[whatsapp] Disconnected:', reason);
-    });
-
-    client.initialize();
-  });
+  console.log('[twilio] Client initialized');
 }
 
-async function sendMessage(chatId, text) {
+async function sendMessage(toNumber, text) {
+  const to = toNumber.startsWith('whatsapp:') ? toNumber : `whatsapp:${toNumber}`;
   try {
-    await client.sendMessage(chatId, text);
+    await client.messages.create({
+      body: text,
+      from: fromNumber,
+      to: to,
+    });
   } catch (err) {
-    console.error('[whatsapp] Failed to send message:', err.message);
+    console.error('[twilio] Failed to send message:', err.message);
   }
 }
 
@@ -58,4 +35,4 @@ function getClient() {
   return client;
 }
 
-module.exports = { start, sendMessage, getClient };
+module.exports = { init, sendMessage, getClient };

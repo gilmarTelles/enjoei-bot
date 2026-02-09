@@ -13,10 +13,10 @@ function formatProduct(product, keyword) {
   return lines.join('\n');
 }
 
-async function notifyNewProducts(products, keyword, chatId) {
+async function notifyNewProducts(products, keyword, phoneNumber) {
   for (const product of products) {
     const message = formatProduct(product, keyword);
-    await sendMessage(chatId, message);
+    await sendMessage(phoneNumber, message);
     // Small delay between messages to avoid rate limiting
     await new Promise(r => setTimeout(r, 1000));
   }

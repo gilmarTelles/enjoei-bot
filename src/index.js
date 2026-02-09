@@ -1,5 +1,6 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
+const express = require('express');
 const cron = require('node-cron');
 const db = require('./db');
 const whatsapp = require('./whatsapp');
@@ -9,13 +10,12 @@ const { notifyNewProducts } = require('./notifier');
 
 const PHONE_NUMBER = process.env.PHONE_NUMBER;
 const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL, 10) || 30;
+const PORT = parseInt(process.env.PORT, 10) || 3000;
 
 if (!PHONE_NUMBER) {
   console.error('Error: PHONE_NUMBER is required in .env');
   process.exit(1);
 }
-
-const OWNER_CHAT_ID = `${PHONE_NUMBER}@c.us`;
 
 async function runCheck() {
   const keywords = db.listKeywords();
@@ -40,7 +40,7 @@ async function runCheck() {
       }
 
       if (newProducts.length > 0) {
-        await notifyNewProducts(newProducts, keyword, OWNER_CHAT_ID);
+        await notifyNewProducts(newProducts, keyword, PHONE_NUMBER);
       }
 
       // Delay between keywords to be polite to the server
@@ -56,25 +56,46 @@ async function runCheck() {
 }
 
 async function main() {
-  console.log('[bot] Starting Enjoei WhatsApp Alert Bot...');
+  console.log('[bot] Starting Enjoei WhatsApp Alert Bot (Twilio)...');
 
   // Initialize database
   db.init();
   console.log('[bot] Database initialized.');
 
+  // Initialize Twilio client
+  whatsapp.init();
+
+  // Set up command check callback
+  commands.setCheckCallback(runCheck);
+
   // Launch browser for scraping
   await scraper.launchBrowser();
   console.log('[bot] Browser launched.');
 
-  // Start WhatsApp client
-  console.log('[bot] Connecting to WhatsApp...');
-  await whatsapp.start();
+  // Set up Express webhook for incoming WhatsApp messages
+  const app = express();
+  app.use(express.urlencoded({ extended: false }));
 
-  // Register chat commands
-  const client = whatsapp.getClient();
-  commands.register(client, PHONE_NUMBER);
-  commands.setCheckCallback(runCheck);
-  console.log('[bot] Commands registered.');
+  app.post('/webhook', (req, res) => {
+    const from = req.body.From || '';   // e.g., "whatsapp:+5541985105151"
+    const body = req.body.Body || '';
+
+    console.log(`[webhook] Message from ${from}: ${body}`);
+    commands.handleMessage(from, body).catch(err => {
+      console.error('[webhook] Error handling message:', err.message);
+    });
+
+    // Respond with empty TwiML (Twilio expects a response)
+    res.type('text/xml').send('<Response></Response>');
+  });
+
+  app.get('/health', (req, res) => {
+    res.send('OK');
+  });
+
+  app.listen(PORT, () => {
+    console.log(`[bot] Webhook server listening on port ${PORT}`);
+  });
 
   // Schedule periodic checks
   const cronExpr = `*/${CHECK_INTERVAL} * * * *`;
@@ -85,7 +106,7 @@ async function main() {
   console.log(`[bot] Scheduled checks every ${CHECK_INTERVAL} minutes.`);
 
   // Send startup message
-  await whatsapp.sendMessage(OWNER_CHAT_ID, 'Enjoei Alert Bot is online! Send "help" for commands.');
+  await whatsapp.sendMessage(PHONE_NUMBER, 'Enjoei Alert Bot is online! Send "help" for commands.');
 
   console.log('[bot] Bot is running. Press Ctrl+C to stop.');
 }
@@ -94,10 +115,6 @@ async function main() {
 async function shutdown() {
   console.log('\n[bot] Shutting down...');
   await scraper.closeBrowser();
-  const client = whatsapp.getClient();
-  if (client) {
-    await client.destroy().catch(() => {});
-  }
   const dbInstance = db.getDb();
   if (dbInstance) {
     dbInstance.close();
