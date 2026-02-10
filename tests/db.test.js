@@ -5,7 +5,6 @@ const db = require('../src/db');
 const TEST_DB = path.join(__dirname, '..', 'data', 'test.db');
 
 beforeAll(() => {
-  // Override DB path for tests
   process.env.NODE_ENV = 'test';
   db.init();
 });
@@ -44,7 +43,7 @@ describe('Keywords', () => {
   test('normalizar para minusculo', () => {
     db.addKeyword('user1', 'Nike Air Max');
     const keywords = db.listKeywords('user1');
-    expect(keywords).toEqual(['nike air max']);
+    expect(keywords[0].keyword).toBe('nike air max');
   });
 
   test('listar palavras-chave por usuario', () => {
@@ -52,8 +51,9 @@ describe('Keywords', () => {
     db.addKeyword('user1', 'adidas');
     db.addKeyword('user2', 'puma');
 
-    expect(db.listKeywords('user1').sort()).toEqual(['adidas', 'nike']);
-    expect(db.listKeywords('user2')).toEqual(['puma']);
+    const u1 = db.listKeywords('user1').map(k => k.keyword).sort();
+    expect(u1).toEqual(['adidas', 'nike']);
+    expect(db.listKeywords('user2').map(k => k.keyword)).toEqual(['puma']);
   });
 
   test('remover palavra-chave', () => {
@@ -74,23 +74,33 @@ describe('Keywords', () => {
     db.removeKeyword('user1', 'nike');
 
     expect(db.listKeywords('user1')).toEqual([]);
-    expect(db.listKeywords('user2')).toEqual(['nike']);
+    expect(db.listKeywords('user2').map(k => k.keyword)).toEqual(['nike']);
+  });
+
+  test('adicionar com max_price', () => {
+    db.addKeyword('user1', 'nike', 200);
+    const keywords = db.listKeywords('user1');
+    expect(keywords[0].keyword).toBe('nike');
+    expect(keywords[0].max_price).toBe(200);
+  });
+
+  test('adicionar sem max_price tem null', () => {
+    db.addKeyword('user1', 'nike');
+    const keywords = db.listKeywords('user1');
+    expect(keywords[0].max_price).toBeNull();
   });
 });
 
 describe('getAllUserKeywords', () => {
-  test('retornar todos os pares usuario-keyword', () => {
-    db.addKeyword('user1', 'nike');
+  test('retornar todos os pares usuario-keyword com max_price', () => {
+    db.addKeyword('user1', 'nike', 150);
     db.addKeyword('user2', 'adidas');
     db.addKeyword('user2', 'nike');
 
     const all = db.getAllUserKeywords();
     expect(all).toHaveLength(3);
-    expect(all).toEqual(expect.arrayContaining([
-      { chat_id: 'user1', keyword: 'nike' },
-      { chat_id: 'user2', keyword: 'adidas' },
-      { chat_id: 'user2', keyword: 'nike' },
-    ]));
+    const nikeUser1 = all.find(k => k.chat_id === 'user1' && k.keyword === 'nike');
+    expect(nikeUser1.max_price).toBe(150);
   });
 
   test('retornar vazio quando nao tem keywords', () => {
@@ -125,6 +135,21 @@ describe('Seen Products', () => {
     db.markProductSeen(product, 'camiseta', 'user1');
     expect(() => db.markProductSeen(product, 'camiseta', 'user1')).not.toThrow();
   });
+
+  test('getSeenProductPrice retorna preco salvo', () => {
+    db.markProductSeen(product, 'camiseta', 'user1');
+    expect(db.getSeenProductPrice('produto-123', 'camiseta', 'user1')).toBe('R$ 50');
+  });
+
+  test('getSeenProductPrice retorna null para produto nao visto', () => {
+    expect(db.getSeenProductPrice('nao-existe', 'camiseta', 'user1')).toBeNull();
+  });
+
+  test('updateSeenProductPrice atualiza preco', () => {
+    db.markProductSeen(product, 'camiseta', 'user1');
+    db.updateSeenProductPrice('produto-123', 'camiseta', 'user1', 'R$ 30');
+    expect(db.getSeenProductPrice('produto-123', 'camiseta', 'user1')).toBe('R$ 30');
+  });
 });
 
 describe('countKeywords', () => {
@@ -142,11 +167,9 @@ describe('countKeywords', () => {
 describe('purgeOldProducts', () => {
   test('remover produtos mais antigos que N dias', () => {
     const instance = db.getDb();
-    // Insert a product with old date
     instance.prepare(
       "INSERT INTO seen_products (product_id, keyword, chat_id, title, price, url, first_seen_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now', '-10 days'))"
     ).run('old-product', 'nike', 'user1', 'Old', 'R$ 10', 'url');
-    // Insert a recent product
     db.markProductSeen({ id: 'new-product', title: 'New', price: 'R$ 20', url: 'url2' }, 'nike', 'user1');
 
     const purged = db.purgeOldProducts(7);

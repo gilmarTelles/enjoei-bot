@@ -34,13 +34,20 @@ function init() {
     );
   `);
 
+  // Migration: add max_price column to keywords
+  try {
+    db.exec('ALTER TABLE keywords ADD COLUMN max_price REAL');
+  } catch (err) {
+    // Column already exists — ignore
+  }
+
   return db;
 }
 
-function addKeyword(chatId, keyword) {
+function addKeyword(chatId, keyword, maxPrice) {
   const normalized = keyword.toLowerCase().trim();
   try {
-    db.prepare('INSERT INTO keywords (chat_id, keyword) VALUES (?, ?)').run(chatId, normalized);
+    db.prepare('INSERT INTO keywords (chat_id, keyword, max_price) VALUES (?, ?, ?)').run(chatId, normalized, maxPrice || null);
     return true;
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return false;
@@ -55,11 +62,11 @@ function removeKeyword(chatId, keyword) {
 }
 
 function listKeywords(chatId) {
-  return db.prepare('SELECT keyword FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId).map(r => r.keyword);
+  return db.prepare('SELECT keyword, max_price FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
 }
 
 function getAllUserKeywords() {
-  return db.prepare('SELECT DISTINCT chat_id, keyword FROM keywords').all();
+  return db.prepare('SELECT DISTINCT chat_id, keyword, max_price FROM keywords').all();
 }
 
 function isProductSeen(productId, keyword, chatId) {
@@ -75,6 +82,15 @@ function markProductSeen(product, keyword, chatId) {
   } catch (err) {
     if (err.code !== 'SQLITE_CONSTRAINT_UNIQUE') throw err;
   }
+}
+
+function getSeenProductPrice(productId, keyword, chatId) {
+  const row = db.prepare('SELECT price FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ?').get(productId, keyword, chatId);
+  return row ? row.price : null;
+}
+
+function updateSeenProductPrice(productId, keyword, chatId, newPrice) {
+  db.prepare('UPDATE seen_products SET price = ? WHERE product_id = ? AND keyword = ? AND chat_id = ?').run(newPrice, productId, keyword, chatId);
 }
 
 function countKeywords(chatId) {
@@ -99,4 +115,8 @@ function getDb() {
   return db;
 }
 
-module.exports = { init, addKeyword, removeKeyword, listKeywords, getAllUserKeywords, isProductSeen, markProductSeen, countKeywords, purgeOldProducts, backupDb, getDb };
+module.exports = {
+  init, addKeyword, removeKeyword, listKeywords, getAllUserKeywords,
+  isProductSeen, markProductSeen, getSeenProductPrice, updateSeenProductPrice,
+  countKeywords, purgeOldProducts, backupDb, getDb,
+};

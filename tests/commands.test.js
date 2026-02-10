@@ -1,3 +1,6 @@
+// Set ALLOWED_USERS before requiring commands
+process.env.ALLOWED_USERS = '6397962194,7653440251';
+
 const db = require('../src/db');
 
 jest.mock('../src/telegram', () => ({
@@ -61,6 +64,7 @@ describe('Commands', () => {
     expect(msg).toContain('/remover');
     expect(msg).toContain('/listar');
     expect(msg).toContain('/buscar');
+    expect(msg).toContain('/status');
   });
 
   test('/start mostra comandos', async () => {
@@ -92,6 +96,26 @@ describe('Commands', () => {
     telegram.sendMessage.mockClear();
     await bot.simulate(ALLOWED, '/adicionar ceni');
     expect(telegram.sendMessage.mock.calls[0][1]).toContain('ja existe');
+  });
+
+  test('/adicionar com filtro de preco', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/adicionar nike < 200');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('adicionada');
+    expect(msg).toContain('nike');
+    expect(msg).toContain('max R$');
+    expect(msg).toContain('200');
+  });
+
+  test('/adicionar com filtro de preco salva no banco', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/adicionar nike air max < 150');
+    const keywords = db.listKeywords(ALLOWED);
+    expect(keywords[0].keyword).toBe('nike air max');
+    expect(keywords[0].max_price).toBe(150);
   });
 
   test('/remover sem argumento mostra uso', async () => {
@@ -136,6 +160,41 @@ describe('Commands', () => {
     expect(msg).toContain('adidas');
   });
 
+  test('/listar mostra filtro de preco', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/adicionar nike < 200');
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ALLOWED, '/listar');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('nike');
+    expect(msg).toContain('max R$');
+  });
+
+  test('/status sem verificacao anterior', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/status');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Nenhuma verificacao');
+  });
+
+  test('/status com dados', async () => {
+    commands.setStatusData({
+      lastCheckTime: '10/02/2026 14:30',
+      keywordsChecked: 3,
+      newProductsFound: 2,
+      priceDrops: 1,
+    });
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/status');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('14:30');
+    expect(msg).toContain('3');
+    expect(msg).toContain('2');
+    expect(msg).toContain('1');
+  });
+
   test('comando desconhecido avisa', async () => {
     const bot = createMockBot();
     commands.register(bot);
@@ -174,5 +233,33 @@ describe('Commands', () => {
     telegram.sendMessage.mockClear();
     await bot.simulate(ALLOWED, '/adicionar palavra11');
     expect(telegram.sendMessage.mock.calls[0][1]).toContain('Limite');
+  });
+});
+
+describe('parsePrice', () => {
+  const { parsePrice } = commands;
+
+  test('parse R$ 150,00', () => {
+    expect(parsePrice('R$ 150,00')).toBe(150);
+  });
+
+  test('parse R$ 1.500,00', () => {
+    expect(parsePrice('R$ 1.500,00')).toBe(1500);
+  });
+
+  test('parse R$50', () => {
+    expect(parsePrice('R$50')).toBe(50);
+  });
+
+  test('parse string vazia retorna null', () => {
+    expect(parsePrice('')).toBeNull();
+  });
+
+  test('parse null retorna null', () => {
+    expect(parsePrice(null)).toBeNull();
+  });
+
+  test('parse texto invalido retorna null', () => {
+    expect(parsePrice('sem preco')).toBeNull();
   });
 });

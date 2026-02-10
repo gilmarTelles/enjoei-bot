@@ -1,19 +1,34 @@
 const db = require('./db');
 const { sendMessage } = require('./telegram');
 
-const ALLOWED_USERS = ['6397962194', '7653440251'];
 const MAX_KEYWORDS = 10;
 const KEYWORD_MIN_LEN = 2;
 const KEYWORD_MAX_LEN = 50;
 
+function getAllowedUsers() {
+  return (process.env.ALLOWED_USERS || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
 function isAllowed(msg) {
-  return ALLOWED_USERS.includes(msg.chat.id.toString());
+  return getAllowedUsers().includes(msg.chat.id.toString());
 }
 
 let checkCallback = null;
+let statusData = null;
 
 function setCheckCallback(cb) {
   checkCallback = cb;
+}
+
+function setStatusData(data) {
+  statusData = data;
+}
+
+function parsePrice(priceStr) {
+  if (!priceStr) return null;
+  const cleaned = priceStr.replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : num;
 }
 
 function register(bot) {
@@ -38,14 +53,24 @@ function register(bot) {
       switch (command) {
         case '/adicionar': {
           if (!arg) {
-            await sendMessage(chatId, 'Uso: /adicionar <palavra>\nExemplo: /adicionar nike air max');
+            await sendMessage(chatId, 'Uso: /adicionar <palavra> [< preco\\_max]\nExemplo: /adicionar nike air max\nExemplo: /adicionar nike < 200');
             return;
           }
-          if (arg.length < KEYWORD_MIN_LEN) {
+
+          // Parse optional price filter: "nike air max < 200"
+          let keyword = arg;
+          let maxPrice = null;
+          const priceMatch = arg.match(/^(.+?)\s*<\s*(\d+(?:[.,]\d+)?)\s*$/);
+          if (priceMatch) {
+            keyword = priceMatch[1].trim();
+            maxPrice = parseFloat(priceMatch[2].replace(',', '.'));
+          }
+
+          if (keyword.length < KEYWORD_MIN_LEN) {
             await sendMessage(chatId, `Palavra-chave muito curta (minimo ${KEYWORD_MIN_LEN} caracteres).`);
             return;
           }
-          if (arg.length > KEYWORD_MAX_LEN) {
+          if (keyword.length > KEYWORD_MAX_LEN) {
             await sendMessage(chatId, `Palavra-chave muito longa (maximo ${KEYWORD_MAX_LEN} caracteres).`);
             return;
           }
@@ -54,11 +79,13 @@ function register(bot) {
             await sendMessage(chatId, `Limite de ${MAX_KEYWORDS} palavras-chave atingido. Remova alguma com /remover.`);
             return;
           }
-          const added = db.addKeyword(chatId, arg);
+          const added = db.addKeyword(chatId, keyword, maxPrice);
           if (added) {
-            await sendMessage(chatId, `Palavra-chave adicionada: "${arg.toLowerCase()}"`);
+            let msg = `Palavra-chave adicionada: "${keyword.toLowerCase()}"`;
+            if (maxPrice) msg += ` (max R$ ${maxPrice.toFixed(2).replace('.', ',')})`;
+            await sendMessage(chatId, msg);
           } else {
-            await sendMessage(chatId, `Palavra-chave "${arg.toLowerCase()}" ja existe.`);
+            await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" ja existe.`);
           }
           break;
         }
@@ -82,7 +109,11 @@ function register(bot) {
           if (keywords.length === 0) {
             await sendMessage(chatId, 'Nenhuma palavra-chave configurada. Use /adicionar <palavra> para comecar.');
           } else {
-            const list = keywords.map((k, i) => `${i + 1}. ${k}`).join('\n');
+            const list = keywords.map((k, i) => {
+              let line = `${i + 1}. ${k.keyword}`;
+              if (k.max_price) line += ` (max R$ ${k.max_price.toFixed(2).replace('.', ',')})`;
+              return line;
+            }).join('\n');
             await sendMessage(chatId, `*Suas palavras-chave:*\n\n${list}`);
           }
           break;
@@ -97,6 +128,23 @@ function register(bot) {
           break;
         }
 
+        case '/status': {
+          if (!statusData) {
+            await sendMessage(chatId, 'Nenhuma verificacao realizada ainda.');
+          } else {
+            const lines = [
+              '*Status do Bot*',
+              '',
+              `Ultima verificacao: ${statusData.lastCheckTime}`,
+              `Palavras-chave verificadas: ${statusData.keywordsChecked}`,
+              `Novos produtos encontrados: ${statusData.newProductsFound}`,
+              `Quedas de preco detectadas: ${statusData.priceDrops}`,
+            ];
+            await sendMessage(chatId, lines.join('\n'));
+          }
+          break;
+        }
+
         case '/ajuda':
         case '/start':
         case '/help': {
@@ -104,9 +152,11 @@ function register(bot) {
             '*Bot Enjoei - Comandos*',
             '',
             '/adicionar <palavra> — Adicionar palavra-chave',
+            '/adicionar <palavra> < preco — Com filtro de preco',
             '/remover <palavra> — Remover palavra-chave',
             '/listar — Ver suas palavras-chave',
             '/buscar — Buscar agora',
+            '/status — Status da ultima verificacao',
             '/ajuda — Mostrar esta mensagem',
           ].join('\n'));
           break;
@@ -123,4 +173,4 @@ function register(bot) {
   });
 }
 
-module.exports = { register, setCheckCallback };
+module.exports = { register, setCheckCallback, setStatusData, parsePrice };

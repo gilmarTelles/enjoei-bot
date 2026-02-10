@@ -1,4 +1,4 @@
-const { formatProduct } = require('../src/notifier');
+const { formatProduct, formatPriceDrop } = require('../src/notifier');
 
 describe('formatProduct', () => {
   test('formatar produto com todos os campos', () => {
@@ -24,5 +24,21 @@ describe('formatProduct', () => {
     const result = formatProduct(product, 'camiseta');
 
     expect(result).toContain('N/A');
+  });
+});
+
+describe('formatPriceDrop', () => {
+  test('formatar queda de preco', () => {
+    const product = {
+      title: 'Camiseta Nike',
+      url: 'https://www.enjoei.com.br/p/camiseta-nike-123',
+    };
+    const result = formatPriceDrop(product, 'nike', 'R$ 150,00', 'R$ 100,00');
+
+    expect(result).toContain('Queda de preco');
+    expect(result).toContain('R$ 150,00');
+    expect(result).toContain('R$ 100,00');
+    expect(result).toContain('"nike"');
+    expect(result).toContain('https://www.enjoei.com.br/p/camiseta-nike-123');
   });
 });

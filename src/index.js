@@ -5,20 +5,25 @@ const db = require('./db');
 const telegram = require('./telegram');
 const commands = require('./commands');
 const scraper = require('./scraper');
-const { notifyNewProducts } = require('./notifier');
+const { notifyNewProducts, notifyPriceDrop } = require('./notifier');
+const { parsePrice } = commands;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL, 10) || 5;
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
 const SCRAPE_DELAY_MS = 3000;
-const ADMIN_CHAT_ID = '7653440251';
 const PURGE_DAYS = 7;
+const STALE_THRESHOLD = 3;
 
 if (!TELEGRAM_BOT_TOKEN) {
   console.error('Erro: TELEGRAM_BOT_TOKEN obrigatorio no .env');
   process.exit(1);
 }
 
+let consecutiveEmptyChecks = 0;
+
 async function notifyAdmin(text) {
+  if (!ADMIN_CHAT_ID) return;
   try {
     await telegram.sendMessage(ADMIN_CHAT_ID, `[Admin] ${text}`);
   } catch (err) {
@@ -47,15 +52,20 @@ async function runCheck() {
   }
 
   // Group keywords by unique keyword to avoid scraping the same word multiple times
+  // Also track max_price per user for filtering
   const keywordMap = {};
-  for (const { chat_id, keyword } of allUserKeywords) {
+  for (const { chat_id, keyword, max_price } of allUserKeywords) {
     if (!keywordMap[keyword]) keywordMap[keyword] = [];
-    keywordMap[keyword].push(chat_id);
+    keywordMap[keyword].push({ chatId: chat_id, maxPrice: max_price });
   }
 
-  console.log(`[check] Verificando ${Object.keys(keywordMap).length} palavra(s)-chave...`);
-
   const keywords = Object.keys(keywordMap);
+  console.log(`[check] Verificando ${keywords.length} palavra(s)-chave...`);
+
+  let totalNewProducts = 0;
+  let totalPriceDrops = 0;
+  let allEmpty = true;
+
   for (let i = 0; i < keywords.length; i++) {
     const keyword = keywords[i];
     try {
@@ -63,19 +73,41 @@ async function runCheck() {
       const products = await scraper.searchProducts(keyword);
       console.log(`[check] ${products.length} produto(s) para "${keyword}"`);
 
-      if (products.length === 0) {
-        console.warn(`[check] Nenhum resultado para "${keyword}" — possivel falha no scraper`);
-      }
+      if (products.length > 0) allEmpty = false;
 
       // For each user watching this keyword
-      for (const chatId of keywordMap[keyword]) {
-        const newProducts = products.filter(p => !db.isProductSeen(p.id, keyword, chatId));
+      for (const { chatId, maxPrice } of keywordMap[keyword]) {
+        // Filter by price if user set a max_price
+        let filtered = products;
+        if (maxPrice) {
+          filtered = products.filter(p => {
+            const price = parsePrice(p.price);
+            return price !== null && price <= maxPrice;
+          });
+        }
+
+        const newProducts = [];
+        for (const product of filtered) {
+          if (!db.isProductSeen(product.id, keyword, chatId)) {
+            newProducts.push(product);
+            db.markProductSeen(product, keyword, chatId);
+          } else {
+            // Check for price drops on already-seen products
+            const oldPriceStr = db.getSeenProductPrice(product.id, keyword, chatId);
+            const oldPrice = parsePrice(oldPriceStr);
+            const newPrice = parsePrice(product.price);
+            if (oldPrice && newPrice && newPrice < oldPrice) {
+              console.log(`[check] Queda de preco: "${product.id}" ${oldPriceStr} -> ${product.price}`);
+              db.updateSeenProductPrice(product.id, keyword, chatId, product.price);
+              await notifyPriceDrop(product, keyword, chatId, oldPriceStr, product.price);
+              totalPriceDrops++;
+            }
+          }
+        }
 
         if (newProducts.length > 0) {
           console.log(`[check] ${newProducts.length} novo(s) para "${keyword}" -> usuario ${chatId}`);
-          for (const product of newProducts) {
-            db.markProductSeen(product, keyword, chatId);
-          }
+          totalNewProducts += newProducts.length;
           await notifyNewProducts(newProducts, keyword, chatId);
         }
       }
@@ -90,7 +122,28 @@ async function runCheck() {
     }
   }
 
-  console.log('[check] Concluido.');
+  // Stale selector detection
+  if (allEmpty && keywords.length > 0) {
+    consecutiveEmptyChecks++;
+    console.warn(`[check] Todas as buscas vazias (${consecutiveEmptyChecks}x consecutivas)`);
+    if (consecutiveEmptyChecks >= STALE_THRESHOLD) {
+      await notifyAdmin(`ALERTA: ${consecutiveEmptyChecks} verificacoes consecutivas sem resultados. Os seletores CSS do enjoei podem ter mudado!`);
+    }
+  } else {
+    consecutiveEmptyChecks = 0;
+  }
+
+  // Update status for /status command
+  const now = new Date();
+  const timeStr = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  commands.setStatusData({
+    lastCheckTime: timeStr,
+    keywordsChecked: keywords.length,
+    newProductsFound: totalNewProducts,
+    priceDrops: totalPriceDrops,
+  });
+
+  console.log(`[check] Concluido. ${totalNewProducts} novo(s), ${totalPriceDrops} queda(s) de preco.`);
 }
 
 async function main() {

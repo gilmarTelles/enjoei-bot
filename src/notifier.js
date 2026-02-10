@@ -12,6 +12,19 @@ function formatProduct(product, keyword) {
   return lines.join('\n');
 }
 
+function formatPriceDrop(product, keyword, oldPrice, newPrice) {
+  const lines = [
+    '\u{1F4B8} *Queda de preco!*',
+    '',
+    `*De:* ${oldPrice}`,
+    `*Para:* ${newPrice}`,
+    `*Link:* ${product.url}`,
+    '',
+    `Palavra-chave: "${keyword}"`,
+  ];
+  return lines.join('\n');
+}
+
 async function notifyNewProducts(products, keyword, chatId) {
   for (const product of products) {
     const caption = formatProduct(product, keyword);
@@ -24,4 +37,13 @@ async function notifyNewProducts(products, keyword, chatId) {
   }
 }
 
-module.exports = { notifyNewProducts, formatProduct };
+async function notifyPriceDrop(product, keyword, chatId, oldPrice, newPrice) {
+  const caption = formatPriceDrop(product, keyword, oldPrice, newPrice);
+  if (product.image) {
+    await sendPhoto(chatId, product.image, caption);
+  } else {
+    await sendMessage(chatId, caption);
+  }
+}
+
+module.exports = { notifyNewProducts, notifyPriceDrop, formatProduct, formatPriceDrop };
