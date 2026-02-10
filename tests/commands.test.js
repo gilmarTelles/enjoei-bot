@@ -518,7 +518,7 @@ describe('callback_query handler', () => {
     expect(filters.sz).toBe('m');
   });
 
-  test('f:sr:t toggle ativa mesmo pais', async () => {
+  test('f:sr:t toggle ativa todo o Brasil', async () => {
     db.addKeyword(ALLOWED, 'nike');
     const keywords = db.listKeywordsWithId(ALLOWED);
     const kwId = keywords[0].id;
@@ -699,8 +699,8 @@ describe('formatFiltersSummary', () => {
     expect(formatFiltersSummary({ sz: 'm' }, 'enjoei')).toBe(' [tam: M]');
   });
 
-  test('formata filtro mesmo pais (enjoei)', () => {
-    expect(formatFiltersSummary({ sr: true }, 'enjoei')).toBe(' [mesmo pais]');
+  test('formata filtro todo o Brasil (enjoei)', () => {
+    expect(formatFiltersSummary({ sr: true }, 'enjoei')).toBe(' [todo o Brasil]');
   });
 
   test('formata filtro menor preco (enjoei)', () => {
@@ -716,7 +716,7 @@ describe('formatFiltersSummary', () => {
     expect(result).toContain('usado');
     expect(result).toContain('masculino');
     expect(result).toContain('tam: G');
-    expect(result).toContain('mesmo pais');
+    expect(result).toContain('todo o Brasil');
     expect(result).toContain('menor preco');
   });
 

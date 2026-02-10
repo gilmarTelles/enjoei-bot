@@ -118,7 +118,7 @@ function buildFilterKeyboard(keywordRow) {
   const usedLabel = filters.used ? '\u2705 Somente usados' : '\u274C Somente usados';
   const depMLabel = filters.dep === 'masculino' ? '\u2705 Masculino' : '\u2B1C Masculino';
   const depFLabel = filters.dep === 'feminino' ? '\u2705 Feminino' : '\u2B1C Feminino';
-  const srLabel = filters.sr ? '\u2705 Mesmo pais' : '\u274C Mesmo pais';
+  const srLabel = filters.sr ? '\u2705 Todo o Brasil' : '\u274C Todo o Brasil';
   const sortALabel = filters.sort === 'price_asc' ? '\u2705 Menor preco' : '\u2B1C Menor preco';
   const sortDLabel = filters.sort === 'price_desc' ? '\u2705 Maior preco' : '\u2B1C Maior preco';
 
@@ -212,7 +212,7 @@ function formatFiltersSummary(filters) {
   if (filters.used) parts.push('usado');
   if (filters.dep) parts.push(filters.dep);
   if (filters.sz) parts.push(`tam: ${filters.sz.toUpperCase()}`);
-  if (filters.sr) parts.push('mesmo pais');
+  if (filters.sr) parts.push('todo o Brasil');
   if (filters.sort === 'price_asc') parts.push('menor preco');
   if (filters.sort === 'price_desc') parts.push('maior preco');
   return parts.length > 0 ? ` [${parts.join(', ')}]` : '';

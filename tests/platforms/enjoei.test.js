@@ -136,7 +136,7 @@ describe('enjoei.formatFiltersSummary', () => {
     expect(result).toContain('usado');
     expect(result).toContain('masculino');
     expect(result).toContain('tam: G');
-    expect(result).toContain('mesmo pais');
+    expect(result).toContain('todo o Brasil');
     expect(result).toContain('menor preco');
   });
 });
