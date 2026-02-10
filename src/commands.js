@@ -13,95 +13,97 @@ function setCheckCallback(cb) {
   checkCallback = cb;
 }
 
-const KNOWN_COMMANDS = ['/adicionar', '/remover', '/listar', '/buscar', '/ajuda', '/start', '/help'];
-
 function register(bot) {
   bot.on('message', async (msg) => {
-    if (!msg.text || !msg.text.startsWith('/')) return;
+    if (!msg.text) return;
+
+    const chatId = msg.chat.id.toString();
+    const text = msg.text.trim();
+
+    if (!text.startsWith('/')) return;
 
     if (!isAllowed(msg)) {
-      await sendMessage(msg.chat.id.toString(), 'Acesso negado.');
+      await sendMessage(chatId, 'Acesso negado.');
       return;
     }
 
-    const command = msg.text.split(/\s+/)[0].toLowerCase();
-    if (!KNOWN_COMMANDS.includes(command)) {
-      await sendMessage(msg.chat.id.toString(), `Comando desconhecido: ${command}\nEnvie /ajuda para ver os comandos disponiveis.`);
-    }
-  });
+    const parts = text.split(/\s+/);
+    const command = parts[0].toLowerCase().replace(/@.*$/, ''); // remove @botname
+    const arg = parts.slice(1).join(' ').trim();
 
-  bot.onText(/\/adicionar$/, async (msg) => {
-    if (!isAllowed(msg)) return;
-    await sendMessage(msg.chat.id.toString(), 'Uso: /adicionar <palavra>\nExemplo: /adicionar nike air max');
-  });
+    try {
+      switch (command) {
+        case '/adicionar': {
+          if (!arg) {
+            await sendMessage(chatId, 'Uso: /adicionar <palavra>\nExemplo: /adicionar nike air max');
+            return;
+          }
+          const added = db.addKeyword(chatId, arg);
+          if (added) {
+            await sendMessage(chatId, `Palavra-chave adicionada: "${arg.toLowerCase()}"`);
+          } else {
+            await sendMessage(chatId, `Palavra-chave "${arg.toLowerCase()}" ja existe.`);
+          }
+          break;
+        }
 
-  bot.onText(/\/adicionar (.+)/, async (msg, match) => {
-    if (!isAllowed(msg)) return;
-    const chatId = msg.chat.id.toString();
-    const keyword = match[1].trim();
-    const added = db.addKeyword(chatId, keyword);
-    if (added) {
-      await sendMessage(chatId, `Palavra-chave adicionada: "${keyword.toLowerCase()}"`);
-    } else {
-      await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" ja existe.`);
-    }
-  });
+        case '/remover': {
+          if (!arg) {
+            await sendMessage(chatId, 'Uso: /remover <palavra>\nExemplo: /remover nike air max');
+            return;
+          }
+          const removed = db.removeKeyword(chatId, arg);
+          if (removed) {
+            await sendMessage(chatId, `Palavra-chave removida: "${arg.toLowerCase()}"`);
+          } else {
+            await sendMessage(chatId, `Palavra-chave "${arg.toLowerCase()}" nao encontrada.`);
+          }
+          break;
+        }
 
-  bot.onText(/\/remover$/, async (msg) => {
-    if (!isAllowed(msg)) return;
-    await sendMessage(msg.chat.id.toString(), 'Uso: /remover <palavra>\nExemplo: /remover nike air max');
-  });
+        case '/listar': {
+          const keywords = db.listKeywords(chatId);
+          if (keywords.length === 0) {
+            await sendMessage(chatId, 'Nenhuma palavra-chave configurada. Use /adicionar <palavra> para comecar.');
+          } else {
+            const list = keywords.map((k, i) => `${i + 1}. ${k}`).join('\n');
+            await sendMessage(chatId, `*Suas palavras-chave:*\n\n${list}`);
+          }
+          break;
+        }
 
-  bot.onText(/\/remover (.+)/, async (msg, match) => {
-    if (!isAllowed(msg)) return;
-    const chatId = msg.chat.id.toString();
-    const keyword = match[1].trim();
-    const removed = db.removeKeyword(chatId, keyword);
-    if (removed) {
-      await sendMessage(chatId, `Palavra-chave removida: "${keyword.toLowerCase()}"`);
-    } else {
-      await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" nao encontrada.`);
-    }
-  });
+        case '/buscar': {
+          await sendMessage(chatId, 'Buscando agora...');
+          if (checkCallback) {
+            await checkCallback();
+            await sendMessage(chatId, 'Busca concluida.');
+          }
+          break;
+        }
 
-  bot.onText(/\/listar/, async (msg) => {
-    if (!isAllowed(msg)) return;
-    const chatId = msg.chat.id.toString();
-    const keywords = db.listKeywords(chatId);
-    if (keywords.length === 0) {
-      await sendMessage(chatId, 'Nenhuma palavra-chave configurada. Use /adicionar <palavra> para comecar.');
-    } else {
-      const list = keywords.map((k, i) => `${i + 1}. ${k}`).join('\n');
-      await sendMessage(chatId, `*Suas palavras-chave:*\n\n${list}`);
-    }
-  });
+        case '/ajuda':
+        case '/start':
+        case '/help': {
+          await sendMessage(chatId, [
+            '*Bot Enjoei - Comandos*',
+            '',
+            '/adicionar <palavra> — Adicionar palavra-chave',
+            '/remover <palavra> — Remover palavra-chave',
+            '/listar — Ver suas palavras-chave',
+            '/buscar — Buscar agora',
+            '/ajuda — Mostrar esta mensagem',
+          ].join('\n'));
+          break;
+        }
 
-  bot.onText(/\/buscar/, async (msg) => {
-    if (!isAllowed(msg)) return;
-    const chatId = msg.chat.id.toString();
-    await sendMessage(chatId, 'Buscando agora...');
-    if (checkCallback) {
-      try {
-        await checkCallback();
-        await sendMessage(chatId, 'Busca concluida.');
-      } catch (err) {
-        await sendMessage(chatId, `Erro na busca: ${err.message}`);
+        default:
+          await sendMessage(chatId, `Comando desconhecido: ${command}\nEnvie /ajuda para ver os comandos disponiveis.`);
+          break;
       }
+    } catch (err) {
+      console.error(`[commands] Erro no comando ${command}:`, err.message);
+      await sendMessage(chatId, `Erro ao executar comando: ${err.message}`);
     }
-  });
-
-  bot.onText(/\/ajuda|\/start|\/help/, async (msg) => {
-    if (!isAllowed(msg)) return;
-    const chatId = msg.chat.id.toString();
-    await sendMessage(chatId, [
-      '*Bot Enjoei - Comandos*',
-      '',
-      '/adicionar <palavra> — Adicionar palavra-chave',
-      '/remover <palavra> — Remover palavra-chave',
-      '/listar — Ver suas palavras-chave',
-      '/buscar — Buscar agora',
-      '/ajuda — Mostrar esta mensagem',
-    ].join('\n'));
   });
 }
 

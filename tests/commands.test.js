@@ -1,49 +1,23 @@
-const fs = require('fs');
 const db = require('../src/db');
 
-// Mock telegram module before requiring commands
-jest.mock('../src/telegram', () => {
-  const messages = [];
-  return {
-    sendMessage: jest.fn(async (chatId, text) => {
-      messages.push({ chatId, text });
-    }),
-    sendPhoto: jest.fn(async (chatId, url, caption) => {
-      messages.push({ chatId, url, caption });
-    }),
-    getMessages: () => messages,
-    clearMessages: () => { messages.length = 0; },
-  };
-});
+jest.mock('../src/telegram', () => ({
+  sendMessage: jest.fn(async () => {}),
+  sendPhoto: jest.fn(async () => {}),
+}));
 
 const telegram = require('../src/telegram');
 
-// Simulate a Telegram bot with onText and on handlers
 function createMockBot() {
-  const handlers = [];
   const messageHandlers = [];
-
   return {
-    onText: (regex, handler) => {
-      handlers.push({ regex, handler });
-    },
     on: (event, handler) => {
       if (event === 'message') messageHandlers.push(handler);
     },
+    onText: () => {},
     async simulate(chatId, text) {
       const msg = { chat: { id: parseInt(chatId) }, text };
-
-      // Fire message handlers first
       for (const handler of messageHandlers) {
         await handler(msg);
-      }
-
-      // Fire matching onText handlers
-      for (const { regex, handler } of handlers) {
-        const match = text.match(regex);
-        if (match) {
-          await handler(msg, match);
-        }
       }
     },
   };
@@ -63,157 +37,116 @@ beforeEach(() => {
   instance.exec('DELETE FROM keywords');
   instance.exec('DELETE FROM seen_products');
   telegram.sendMessage.mockClear();
-  telegram.clearMessages();
 });
 
 const commands = require('../src/commands');
 
 describe('Commands', () => {
-  const ALLOWED_USER = '6397962194';
-  const BLOCKED_USER = '9999999999';
+  const ALLOWED = '6397962194';
+  const BLOCKED = '9999999999';
 
   test('usuario nao autorizado recebe acesso negado', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(BLOCKED_USER, '/ajuda');
-
-    expect(telegram.sendMessage).toHaveBeenCalledWith(
-      BLOCKED_USER,
-      'Acesso negado.'
-    );
+    await bot.simulate(BLOCKED, '/ajuda');
+    expect(telegram.sendMessage).toHaveBeenCalledWith(BLOCKED, 'Acesso negado.');
   });
 
   test('/ajuda mostra comandos', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/ajuda');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const helpMsg = calls.find(c => c[1].includes('Comandos'));
-    expect(helpMsg).toBeTruthy();
-    expect(helpMsg[1]).toContain('/adicionar');
-    expect(helpMsg[1]).toContain('/remover');
-    expect(helpMsg[1]).toContain('/listar');
-    expect(helpMsg[1]).toContain('/buscar');
+    await bot.simulate(ALLOWED, '/ajuda');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('/adicionar');
+    expect(msg).toContain('/remover');
+    expect(msg).toContain('/listar');
+    expect(msg).toContain('/buscar');
   });
 
   test('/start mostra comandos', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/start');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const helpMsg = calls.find(c => c[1].includes('Comandos'));
-    expect(helpMsg).toBeTruthy();
+    await bot.simulate(ALLOWED, '/start');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Comandos');
   });
 
   test('/adicionar sem argumento mostra uso', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/adicionar');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const usageMsg = calls.find(c => c[1].includes('Uso:'));
-    expect(usageMsg).toBeTruthy();
+    await bot.simulate(ALLOWED, '/adicionar');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Uso:');
   });
 
-  test('/adicionar com palavra-chave confirma', async () => {
+  test('/adicionar com palavra confirma', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/adicionar ceni');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const confirmMsg = calls.find(c => c[1].includes('adicionada'));
-    expect(confirmMsg).toBeTruthy();
-    expect(confirmMsg[1]).toContain('ceni');
+    await bot.simulate(ALLOWED, '/adicionar ceni');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('adicionada');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('ceni');
   });
 
   test('/adicionar duplicada avisa', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/adicionar ceni');
+    await bot.simulate(ALLOWED, '/adicionar ceni');
     telegram.sendMessage.mockClear();
-    await bot.simulate(ALLOWED_USER, '/adicionar ceni');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const dupeMsg = calls.find(c => c[1].includes('ja existe'));
-    expect(dupeMsg).toBeTruthy();
+    await bot.simulate(ALLOWED, '/adicionar ceni');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('ja existe');
   });
 
   test('/remover sem argumento mostra uso', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/remover');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const usageMsg = calls.find(c => c[1].includes('Uso:'));
-    expect(usageMsg).toBeTruthy();
+    await bot.simulate(ALLOWED, '/remover');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Uso:');
   });
 
   test('/remover palavra existente confirma', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/adicionar ceni');
+    await bot.simulate(ALLOWED, '/adicionar ceni');
     telegram.sendMessage.mockClear();
-    await bot.simulate(ALLOWED_USER, '/remover ceni');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const confirmMsg = calls.find(c => c[1].includes('removida'));
-    expect(confirmMsg).toBeTruthy();
+    await bot.simulate(ALLOWED, '/remover ceni');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('removida');
   });
 
   test('/remover palavra inexistente avisa', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/remover naoexiste');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const notFoundMsg = calls.find(c => c[1].includes('nao encontrada'));
-    expect(notFoundMsg).toBeTruthy();
+    await bot.simulate(ALLOWED, '/remover naoexiste');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('nao encontrada');
   });
 
   test('/listar sem palavras mostra mensagem', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/listar');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const emptyMsg = calls.find(c => c[1].includes('Nenhuma'));
-    expect(emptyMsg).toBeTruthy();
+    await bot.simulate(ALLOWED, '/listar');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Nenhuma');
   });
 
   test('/listar com palavras mostra lista', async () => {
     const bot = createMockBot();
     commands.register(bot);
-
-    await bot.simulate(ALLOWED_USER, '/adicionar nike');
-    await bot.simulate(ALLOWED_USER, '/adicionar adidas');
+    await bot.simulate(ALLOWED, '/adicionar nike');
+    await bot.simulate(ALLOWED, '/adicionar adidas');
     telegram.sendMessage.mockClear();
-    await bot.simulate(ALLOWED_USER, '/listar');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const listMsg = calls.find(c => c[1].includes('nike') && c[1].includes('adidas'));
-    expect(listMsg).toBeTruthy();
+    await bot.simulate(ALLOWED, '/listar');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('nike');
+    expect(msg).toContain('adidas');
   });
 
   test('comando desconhecido avisa', async () => {
     const bot = createMockBot();
     commands.register(bot);
+    await bot.simulate(ALLOWED, '/comandoinvalido');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Comando desconhecido');
+  });
 
-    await bot.simulate(ALLOWED_USER, '/comandoinvalido');
-
-    const calls = telegram.sendMessage.mock.calls;
-    const unknownMsg = calls.find(c => c[1].includes('Comando desconhecido'));
-    expect(unknownMsg).toBeTruthy();
+  test('mensagem sem / e ignorada', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, 'ola mundo');
+    expect(telegram.sendMessage).not.toHaveBeenCalled();
   });
 });
