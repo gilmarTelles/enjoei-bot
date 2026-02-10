@@ -16,35 +16,37 @@ if (!TELEGRAM_BOT_TOKEN) {
 }
 
 async function runCheck() {
-  const keywords = db.listKeywords();
-  if (keywords.length === 0) {
-    console.log('[check] Nenhuma palavra-chave, pulando.');
+  const allUserKeywords = db.getAllUserKeywords();
+  if (allUserKeywords.length === 0) {
+    console.log('[check] Nenhuma palavra-chave de nenhum usuario, pulando.');
     return;
   }
 
-  const subscribers = db.listSubscribers();
-  if (subscribers.length === 0) {
-    console.log('[check] Nenhum inscrito, pulando.');
-    return;
+  // Group keywords by unique keyword to avoid scraping the same word multiple times
+  const keywordMap = {};
+  for (const { chat_id, keyword } of allUserKeywords) {
+    if (!keywordMap[keyword]) keywordMap[keyword] = [];
+    keywordMap[keyword].push(chat_id);
   }
 
-  console.log(`[check] Verificando ${keywords.length} palavra(s)-chave para ${subscribers.length} inscrito(s)...`);
+  console.log(`[check] Verificando ${Object.keys(keywordMap).length} palavra(s)-chave...`);
 
+  const keywords = Object.keys(keywordMap);
   for (const keyword of keywords) {
     try {
       console.log(`[check] Buscando: "${keyword}"`);
       const products = await scraper.searchProducts(keyword);
       console.log(`[check] ${products.length} produto(s) para "${keyword}"`);
 
-      const newProducts = products.filter(p => !db.isProductSeen(p.id, keyword));
-      console.log(`[check] ${newProducts.length} novo(s) para "${keyword}"`);
+      // For each user watching this keyword
+      for (const chatId of keywordMap[keyword]) {
+        const newProducts = products.filter(p => !db.isProductSeen(p.id, keyword, chatId));
 
-      for (const product of newProducts) {
-        db.markProductSeen(product, keyword);
-      }
-
-      if (newProducts.length > 0) {
-        for (const chatId of subscribers) {
+        if (newProducts.length > 0) {
+          console.log(`[check] ${newProducts.length} novo(s) para "${keyword}" -> usuario ${chatId}`);
+          for (const product of newProducts) {
+            db.markProductSeen(product, keyword, chatId);
+          }
           await notifyNewProducts(newProducts, keyword, chatId);
         }
       }
@@ -63,26 +65,18 @@ async function runCheck() {
 async function main() {
   console.log('[bot] Iniciando Bot Enjoei (Telegram)...');
 
-  // Inicializar banco de dados
   db.init();
   console.log('[bot] Banco de dados inicializado.');
 
-  // Adicionar palavra-chave padrao
-  db.addKeyword('ceni');
-
-  // Inicializar bot Telegram
   const bot = telegram.init(TELEGRAM_BOT_TOKEN);
 
-  // Registrar comandos
   commands.setCheckCallback(runCheck);
   commands.register(bot);
   console.log('[bot] Comandos registrados.');
 
-  // Iniciar navegador
   await scraper.launchBrowser();
   console.log('[bot] Navegador iniciado.');
 
-  // Agendar verificacoes periodicas
   const cronExpr = `*/${CHECK_INTERVAL} * * * *`;
   cron.schedule(cronExpr, () => {
     console.log(`[cron] Verificacao agendada`);
@@ -93,7 +87,6 @@ async function main() {
   console.log('[bot] Bot rodando. Ctrl+C para parar.');
 }
 
-// Encerramento gracioso
 async function shutdown() {
   console.log('\n[bot] Encerrando...');
   await scraper.closeBrowser();
