@@ -1,5 +1,5 @@
 const db = require('./db');
-const { sendMessage } = require('./whatsapp');
+const { sendMessage } = require('./telegram');
 
 let checkCallback = null;
 
@@ -7,84 +7,63 @@ function setCheckCallback(cb) {
   checkCallback = cb;
 }
 
-async function handleMessage(from, body) {
-  const text = body.trim();
-  if (!text) return;
-
-  const [command, ...args] = text.split(/\s+/);
-  const keyword = args.join(' ');
-
-  switch (command.toLowerCase()) {
-    case 'add': {
-      if (!keyword) {
-        await sendMessage(from, 'Usage: add <keyword>\nExample: add nike air max');
-        return;
-      }
-      const added = db.addKeyword(keyword);
-      if (added) {
-        await sendMessage(from, `Added keyword: "${keyword.toLowerCase()}"`);
-      } else {
-        await sendMessage(from, `Keyword "${keyword.toLowerCase()}" already exists.`);
-      }
-      break;
+function register(bot) {
+  bot.onText(/\/entrar/, async (msg) => {
+    const chatId = msg.chat.id.toString();
+    const added = db.addSubscriber(chatId);
+    if (added) {
+      await sendMessage(chatId, 'Voce foi inscrito! Vai receber alertas de novos itens no Enjoei.');
+    } else {
+      await sendMessage(chatId, 'Voce ja esta inscrito.');
     }
+  });
 
-    case 'remove': {
-      if (!keyword) {
-        await sendMessage(from, 'Usage: remove <keyword>\nExample: remove nike air max');
-        return;
-      }
-      const removed = db.removeKeyword(keyword);
-      if (removed) {
-        await sendMessage(from, `Removed keyword: "${keyword.toLowerCase()}"`);
-      } else {
-        await sendMessage(from, `Keyword "${keyword.toLowerCase()}" not found.`);
-      }
-      break;
+  bot.onText(/\/sair/, async (msg) => {
+    const chatId = msg.chat.id.toString();
+    const removed = db.removeSubscriber(chatId);
+    if (removed) {
+      await sendMessage(chatId, 'Voce foi removido. Nao vai mais receber alertas.');
+    } else {
+      await sendMessage(chatId, 'Voce nao esta inscrito.');
     }
+  });
 
-    case 'list': {
-      const keywords = db.listKeywords();
-      if (keywords.length === 0) {
-        await sendMessage(from, 'No keywords configured. Use "add <keyword>" to start.');
-      } else {
-        const list = keywords.map((k, i) => `${i + 1}. ${k}`).join('\n');
-        await sendMessage(from, `*Active keywords:*\n\n${list}`);
+  bot.onText(/\/listar/, async (msg) => {
+    const chatId = msg.chat.id.toString();
+    const keywords = db.listKeywords();
+    if (keywords.length === 0) {
+      await sendMessage(chatId, 'Nenhuma palavra-chave configurada.');
+    } else {
+      const list = keywords.map((k, i) => `${i + 1}. ${k}`).join('\n');
+      await sendMessage(chatId, `*Palavras-chave monitoradas:*\n\n${list}`);
+    }
+  });
+
+  bot.onText(/\/buscar/, async (msg) => {
+    const chatId = msg.chat.id.toString();
+    await sendMessage(chatId, 'Buscando agora...');
+    if (checkCallback) {
+      try {
+        await checkCallback();
+        await sendMessage(chatId, 'Busca concluida.');
+      } catch (err) {
+        await sendMessage(chatId, `Erro na busca: ${err.message}`);
       }
-      break;
     }
+  });
 
-    case 'check': {
-      await sendMessage(from, 'Running manual check...');
-      if (checkCallback) {
-        try {
-          await checkCallback();
-          await sendMessage(from, 'Check completed.');
-        } catch (err) {
-          await sendMessage(from, `Check failed: ${err.message}`);
-        }
-      } else {
-        await sendMessage(from, 'Check function not configured yet.');
-      }
-      break;
-    }
-
-    case 'help': {
-      await sendMessage(from, [
-        '*Enjoei Alert Bot - Commands*',
-        '',
-        'add <keyword> — Add a keyword to watch',
-        'remove <keyword> — Remove a keyword',
-        'list — Show all active keywords',
-        'check — Run an immediate search',
-        'help — Show this message',
-      ].join('\n'));
-      break;
-    }
-
-    default:
-      break;
-  }
+  bot.onText(/\/ajuda|\/start|\/help/, async (msg) => {
+    const chatId = msg.chat.id.toString();
+    await sendMessage(chatId, [
+      '*Bot Enjoei - Comandos*',
+      '',
+      '/entrar — Receber alertas de novos itens',
+      '/sair — Parar de receber alertas',
+      '/listar — Ver palavras-chave monitoradas',
+      '/buscar — Buscar agora',
+      '/ajuda — Mostrar esta mensagem',
+    ].join('\n'));
+  });
 }
 
-module.exports = { handleMessage, setCheckCallback };
+module.exports = { register, setCheckCallback };

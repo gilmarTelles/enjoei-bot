@@ -1,120 +1,106 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const express = require('express');
 const cron = require('node-cron');
 const db = require('./db');
-const whatsapp = require('./whatsapp');
+const telegram = require('./telegram');
 const commands = require('./commands');
 const scraper = require('./scraper');
 const { notifyNewProducts } = require('./notifier');
 
-const PHONE_NUMBER = process.env.PHONE_NUMBER;
-const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL, 10) || 30;
-const PORT = parseInt(process.env.PORT, 10) || 3000;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL, 10) || 5;
 
-if (!PHONE_NUMBER) {
-  console.error('Error: PHONE_NUMBER is required in .env');
+if (!TELEGRAM_BOT_TOKEN) {
+  console.error('Erro: TELEGRAM_BOT_TOKEN obrigatorio no .env');
   process.exit(1);
 }
 
 async function runCheck() {
   const keywords = db.listKeywords();
   if (keywords.length === 0) {
-    console.log('[check] No keywords configured, skipping.');
+    console.log('[check] Nenhuma palavra-chave, pulando.');
     return;
   }
 
-  console.log(`[check] Checking ${keywords.length} keyword(s)...`);
+  const subscribers = db.listSubscribers();
+  if (subscribers.length === 0) {
+    console.log('[check] Nenhum inscrito, pulando.');
+    return;
+  }
+
+  console.log(`[check] Verificando ${keywords.length} palavra(s)-chave para ${subscribers.length} inscrito(s)...`);
 
   for (const keyword of keywords) {
     try {
-      console.log(`[check] Searching for: "${keyword}"`);
+      console.log(`[check] Buscando: "${keyword}"`);
       const products = await scraper.searchProducts(keyword);
-      console.log(`[check] Found ${products.length} product(s) for "${keyword}"`);
+      console.log(`[check] ${products.length} produto(s) para "${keyword}"`);
 
       const newProducts = products.filter(p => !db.isProductSeen(p.id, keyword));
-      console.log(`[check] ${newProducts.length} new product(s) for "${keyword}"`);
+      console.log(`[check] ${newProducts.length} novo(s) para "${keyword}"`);
 
       for (const product of newProducts) {
         db.markProductSeen(product, keyword);
       }
 
       if (newProducts.length > 0) {
-        await notifyNewProducts(newProducts, keyword, PHONE_NUMBER);
+        for (const chatId of subscribers) {
+          await notifyNewProducts(newProducts, keyword, chatId);
+        }
       }
 
-      // Delay between keywords to be polite to the server
       if (keywords.indexOf(keyword) < keywords.length - 1) {
         await new Promise(r => setTimeout(r, 3000));
       }
     } catch (err) {
-      console.error(`[check] Error checking "${keyword}":`, err.message);
+      console.error(`[check] Erro em "${keyword}":`, err.message);
     }
   }
 
-  console.log('[check] Done.');
+  console.log('[check] Concluido.');
 }
 
 async function main() {
-  console.log('[bot] Starting Enjoei WhatsApp Alert Bot (Twilio)...');
+  console.log('[bot] Iniciando Bot Enjoei (Telegram)...');
 
-  // Initialize database
+  // Inicializar banco de dados
   db.init();
-  console.log('[bot] Database initialized.');
+  console.log('[bot] Banco de dados inicializado.');
 
-  // Initialize Twilio client
-  whatsapp.init();
+  // Adicionar palavra-chave padrao
+  db.addKeyword('ceni');
 
-  // Set up command check callback
+  // Inicializar bot Telegram
+  const bot = telegram.init(TELEGRAM_BOT_TOKEN);
+
+  // Registrar comandos
   commands.setCheckCallback(runCheck);
+  commands.register(bot);
+  console.log('[bot] Comandos registrados.');
 
-  // Launch browser for scraping
+  // Iniciar navegador
   await scraper.launchBrowser();
-  console.log('[bot] Browser launched.');
+  console.log('[bot] Navegador iniciado.');
 
-  // Set up Express webhook for incoming WhatsApp messages
-  const app = express();
-  app.use(express.urlencoded({ extended: false }));
-
-  app.post('/webhook', (req, res) => {
-    const from = req.body.From || '';   // e.g., "whatsapp:+5541985105151"
-    const body = req.body.Body || '';
-
-    console.log(`[webhook] Message from ${from}: ${body}`);
-    commands.handleMessage(from, body).catch(err => {
-      console.error('[webhook] Error handling message:', err.message);
-    });
-
-    // Respond with empty TwiML (Twilio expects a response)
-    res.type('text/xml').send('<Response></Response>');
-  });
-
-  app.get('/health', (req, res) => {
-    res.send('OK');
-  });
-
-  app.listen(PORT, () => {
-    console.log(`[bot] Webhook server listening on port ${PORT}`);
-  });
-
-  // Schedule periodic checks
+  // Agendar verificacoes periodicas
   const cronExpr = `*/${CHECK_INTERVAL} * * * *`;
   cron.schedule(cronExpr, () => {
-    console.log(`[cron] Triggered scheduled check`);
-    runCheck().catch(err => console.error('[cron] Check error:', err.message));
+    console.log(`[cron] Verificacao agendada`);
+    runCheck().catch(err => console.error('[cron] Erro:', err.message));
   });
-  console.log(`[bot] Scheduled checks every ${CHECK_INTERVAL} minutes.`);
+  console.log(`[bot] Verificacoes agendadas a cada ${CHECK_INTERVAL} minutos.`);
 
-  // Send startup message
-  await whatsapp.sendMessage(PHONE_NUMBER, 'Enjoei Alert Bot is online! Send "help" for commands.');
-
-  console.log('[bot] Bot is running. Press Ctrl+C to stop.');
+  console.log('[bot] Bot rodando. Ctrl+C para parar.');
 }
 
-// Graceful shutdown
+// Encerramento gracioso
 async function shutdown() {
-  console.log('\n[bot] Shutting down...');
+  console.log('\n[bot] Encerrando...');
   await scraper.closeBrowser();
+  const botInstance = telegram.getBot();
+  if (botInstance) {
+    botInstance.stopPolling();
+  }
   const dbInstance = db.getDb();
   if (dbInstance) {
     dbInstance.close();
@@ -126,6 +112,6 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 main().catch((err) => {
-  console.error('[bot] Fatal error:', err);
+  console.error('[bot] Erro fatal:', err);
   process.exit(1);
 });

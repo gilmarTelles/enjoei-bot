@@ -1,24 +1,22 @@
-const { sendMessage } = require('./whatsapp');
+const { sendMessage } = require('./telegram');
 
 function formatProduct(product, keyword) {
   const lines = [
-    '\u{1F514} *New on Enjoei!*',
+    '\u{1F6A8} *Novo item no Enjoei!*',
     '',
-    `*Title:* ${product.title || 'N/A'}`,
-    `*Price:* ${product.price || 'N/A'}`,
+    `*Preco:* ${product.price || 'N/A'}`,
     `*Link:* ${product.url}`,
     '',
-    `Keyword: "${keyword}"`,
+    `Palavra-chave: "${keyword}"`,
   ];
   return lines.join('\n');
 }
 
-async function notifyNewProducts(products, keyword, phoneNumber) {
+async function notifyNewProducts(products, keyword, chatId) {
   for (const product of products) {
     const message = formatProduct(product, keyword);
-    await sendMessage(phoneNumber, message);
-    // Small delay between messages to avoid rate limiting
-    await new Promise(r => setTimeout(r, 1000));
+    await sendMessage(chatId, message);
+    await new Promise(r => setTimeout(r, 500));
   }
 }
 

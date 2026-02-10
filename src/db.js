@@ -19,6 +19,12 @@ function init() {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS subscribers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT UNIQUE NOT NULL,
+      subscribed_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS seen_products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       product_id TEXT NOT NULL,
@@ -70,8 +76,27 @@ function markProductSeen(product, keyword) {
   }
 }
 
+function addSubscriber(phone) {
+  try {
+    db.prepare('INSERT INTO subscribers (phone) VALUES (?)').run(phone);
+    return true;
+  } catch (err) {
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return false;
+    throw err;
+  }
+}
+
+function removeSubscriber(phone) {
+  const result = db.prepare('DELETE FROM subscribers WHERE phone = ?').run(phone);
+  return result.changes > 0;
+}
+
+function listSubscribers() {
+  return db.prepare('SELECT phone FROM subscribers').all().map(r => r.phone);
+}
+
 function getDb() {
   return db;
 }
 
-module.exports = { init, addKeyword, removeKeyword, listKeywords, isProductSeen, markProductSeen, getDb };
+module.exports = { init, addKeyword, removeKeyword, listKeywords, isProductSeen, markProductSeen, addSubscriber, removeSubscriber, listSubscribers, getDb };
