@@ -1,8 +1,16 @@
 const puppeteer = require('puppeteer');
 
 let browser = null;
+let launchTime = null;
+const BROWSER_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 async function launchBrowser() {
+  // Restart browser if it's been running for over 24h
+  if (browser && browser.connected && launchTime && (Date.now() - launchTime > BROWSER_MAX_AGE_MS)) {
+    console.log('[scraper] Reiniciando navegador (24h atingidas)');
+    await closeBrowser();
+  }
+
   if (browser && browser.connected) return browser;
 
   const launchOptions = {
@@ -30,15 +38,17 @@ async function launchBrowser() {
   }
 
   browser = await puppeteer.launch(launchOptions);
+  launchTime = Date.now();
 
   browser.on('disconnected', () => {
     browser = null;
+    launchTime = null;
   });
 
   return browser;
 }
 
-async function searchProducts(keyword) {
+async function scrapePage(keyword) {
   const b = await launchBrowser();
   const page = await b.newPage();
 
@@ -82,7 +92,6 @@ async function searchProducts(keyword) {
         const priceContainer = card.querySelector('[data-test="div-preco"], .c-product-card__price');
         let price = '';
         if (priceContainer) {
-          // The current price is in a span that is NOT .c-product-card__price-discount
           const spans = priceContainer.querySelectorAll('span');
           for (const span of spans) {
             if (!span.classList.contains('c-product-card__price-discount') && !span.classList.contains('c-product-card__price')) {
@@ -93,7 +102,6 @@ async function searchProducts(keyword) {
               }
             }
           }
-          // Fallback: any R$ in the container
           if (!price) {
             const priceMatch = priceContainer.textContent.match(/R\$\s*[\d.,]+/);
             if (priceMatch) price = priceMatch[0];
@@ -115,18 +123,36 @@ async function searchProducts(keyword) {
     });
 
     return products;
-  } catch (err) {
-    console.error(`[scraper] Error searching for "${keyword}":`, err.message);
-    return [];
   } finally {
     await page.close().catch(() => {});
   }
+}
+
+const MAX_RETRIES = 2;
+
+async function searchProducts(keyword) {
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    try {
+      return await scrapePage(keyword);
+    } catch (err) {
+      console.error(`[scraper] Tentativa ${attempt} falhou para "${keyword}": ${err.message}`);
+      if (attempt <= MAX_RETRIES) {
+        // Wait before retry, longer on second retry
+        await new Promise(r => setTimeout(r, attempt * 3000));
+      } else {
+        console.error(`[scraper] Todas as tentativas falharam para "${keyword}"`);
+        return [];
+      }
+    }
+  }
+  return [];
 }
 
 async function closeBrowser() {
   if (browser) {
     await browser.close().catch(() => {});
     browser = null;
+    launchTime = null;
   }
 }
 
