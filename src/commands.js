@@ -13,12 +13,26 @@ function setCheckCallback(cb) {
   checkCallback = cb;
 }
 
+const KNOWN_COMMANDS = ['/adicionar', '/remover', '/listar', '/buscar', '/ajuda', '/start', '/help'];
+
 function register(bot) {
   bot.on('message', async (msg) => {
-    if (!isAllowed(msg) && msg.text && msg.text.startsWith('/')) {
+    if (!msg.text || !msg.text.startsWith('/')) return;
+
+    if (!isAllowed(msg)) {
       await sendMessage(msg.chat.id.toString(), 'Acesso negado.');
       return;
     }
+
+    const command = msg.text.split(/\s+/)[0].toLowerCase();
+    if (!KNOWN_COMMANDS.includes(command)) {
+      await sendMessage(msg.chat.id.toString(), `Comando desconhecido: ${command}\nEnvie /ajuda para ver os comandos disponiveis.`);
+    }
+  });
+
+  bot.onText(/\/adicionar$/, async (msg) => {
+    if (!isAllowed(msg)) return;
+    await sendMessage(msg.chat.id.toString(), 'Uso: /adicionar <palavra>\nExemplo: /adicionar nike air max');
   });
 
   bot.onText(/\/adicionar (.+)/, async (msg, match) => {
@@ -31,6 +45,11 @@ function register(bot) {
     } else {
       await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" ja existe.`);
     }
+  });
+
+  bot.onText(/\/remover$/, async (msg) => {
+    if (!isAllowed(msg)) return;
+    await sendMessage(msg.chat.id.toString(), 'Uso: /remover <palavra>\nExemplo: /remover nike air max');
   });
 
   bot.onText(/\/remover (.+)/, async (msg, match) => {

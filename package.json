@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "jest"
   },
   "description": "Enjoei WhatsApp alert bot - scrapes enjoei.com.br and sends WhatsApp alerts for keyword matches",
   "dependencies": {
@@ -12,5 +13,8 @@
     "node-cron": "^4.2.1",
     "node-telegram-bot-api": "^0.67.0",
     "puppeteer": "^24.37.2"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0"
   }
 }
