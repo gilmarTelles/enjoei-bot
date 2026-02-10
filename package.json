@@ -8,6 +8,7 @@
   },
   "description": "Enjoei WhatsApp alert bot - scrapes enjoei.com.br and sends WhatsApp alerts for keyword matches",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.2.4",
     "node-cron": "^4.2.1",
