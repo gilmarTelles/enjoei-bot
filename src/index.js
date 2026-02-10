@@ -44,6 +44,16 @@ async function runMaintenance() {
   }
 }
 
+function parseFiltersJson(filtersStr) {
+  if (!filtersStr) return null;
+  try {
+    const obj = JSON.parse(filtersStr);
+    return Object.keys(obj).length > 0 ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
 async function runCheck() {
   const allUserKeywords = db.getAllUserKeywords();
   if (allUserKeywords.length === 0) {
@@ -51,32 +61,38 @@ async function runCheck() {
     return;
   }
 
-  // Group keywords by unique keyword to avoid scraping the same word multiple times
-  // Also track max_price per user for filtering
-  const keywordMap = {};
-  for (const { chat_id, keyword, max_price } of allUserKeywords) {
-    if (!keywordMap[keyword]) keywordMap[keyword] = [];
-    keywordMap[keyword].push({ chatId: chat_id, maxPrice: max_price });
+  // Group by keyword + filters combo to avoid duplicate scrapes
+  // Users with the same keyword AND same filters share a single scrape
+  const scrapeGroupMap = {};
+  for (const { id, chat_id, keyword, max_price, filters } of allUserKeywords) {
+    const parsedFilters = parseFiltersJson(filters);
+    const filtersKey = parsedFilters ? JSON.stringify(parsedFilters) : '';
+    const groupKey = `${keyword}||${filtersKey}`;
+    if (!scrapeGroupMap[groupKey]) {
+      scrapeGroupMap[groupKey] = { keyword, filters: parsedFilters, users: [] };
+    }
+    scrapeGroupMap[groupKey].users.push({ chatId: chat_id, maxPrice: max_price });
   }
 
-  const keywords = Object.keys(keywordMap);
-  console.log(`[check] Verificando ${keywords.length} palavra(s)-chave...`);
+  const groups = Object.values(scrapeGroupMap);
+  console.log(`[check] Verificando ${groups.length} grupo(s) de busca...`);
 
   let totalNewProducts = 0;
   let totalPriceDrops = 0;
   let allEmpty = true;
 
-  for (let i = 0; i < keywords.length; i++) {
-    const keyword = keywords[i];
+  for (let i = 0; i < groups.length; i++) {
+    const { keyword, filters, users } = groups[i];
     try {
-      console.log(`[check] Buscando: "${keyword}"`);
-      const products = await scraper.searchProducts(keyword);
+      const filtersLabel = filters ? ` (filtros: ${JSON.stringify(filters)})` : '';
+      console.log(`[check] Buscando: "${keyword}"${filtersLabel}`);
+      const products = await scraper.searchProducts(keyword, filters);
       console.log(`[check] ${products.length} produto(s) para "${keyword}"`);
 
       if (products.length > 0) allEmpty = false;
 
-      // For each user watching this keyword
-      for (const { chatId, maxPrice } of keywordMap[keyword]) {
+      // For each user watching this keyword+filters combo
+      for (const { chatId, maxPrice } of users) {
         // Filter by price if user set a max_price
         let filtered = products;
         if (maxPrice) {
@@ -113,7 +129,7 @@ async function runCheck() {
       }
 
       // Rate limiting between scrapes
-      if (i < keywords.length - 1) {
+      if (i < groups.length - 1) {
         await new Promise(r => setTimeout(r, SCRAPE_DELAY_MS));
       }
     } catch (err) {
@@ -123,7 +139,7 @@ async function runCheck() {
   }
 
   // Stale selector detection
-  if (allEmpty && keywords.length > 0) {
+  if (allEmpty && groups.length > 0) {
     consecutiveEmptyChecks++;
     console.warn(`[check] Todas as buscas vazias (${consecutiveEmptyChecks}x consecutivas)`);
     if (consecutiveEmptyChecks >= STALE_THRESHOLD) {
@@ -138,7 +154,7 @@ async function runCheck() {
   const timeStr = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   commands.setStatusData({
     lastCheckTime: timeStr,
-    keywordsChecked: keywords.length,
+    keywordsChecked: groups.length,
     newProductsFound: totalNewProducts,
     priceDrops: totalPriceDrops,
   });

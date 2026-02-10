@@ -92,7 +92,7 @@ describe('Keywords', () => {
 });
 
 describe('getAllUserKeywords', () => {
-  test('retornar todos os pares usuario-keyword com max_price', () => {
+  test('retornar todos os pares usuario-keyword com max_price e id/filters', () => {
     db.addKeyword('user1', 'nike', 150);
     db.addKeyword('user2', 'adidas');
     db.addKeyword('user2', 'nike');
@@ -101,10 +101,82 @@ describe('getAllUserKeywords', () => {
     expect(all).toHaveLength(3);
     const nikeUser1 = all.find(k => k.chat_id === 'user1' && k.keyword === 'nike');
     expect(nikeUser1.max_price).toBe(150);
+    expect(nikeUser1).toHaveProperty('id');
+    expect(nikeUser1).toHaveProperty('filters');
   });
 
   test('retornar vazio quando nao tem keywords', () => {
     expect(db.getAllUserKeywords()).toEqual([]);
+  });
+});
+
+describe('listKeywordsWithId', () => {
+  test('retornar keywords com id', () => {
+    db.addKeyword('user1', 'nike');
+    db.addKeyword('user1', 'adidas');
+
+    const keywords = db.listKeywordsWithId('user1');
+    expect(keywords).toHaveLength(2);
+    expect(keywords[0]).toHaveProperty('id');
+    expect(keywords[0]).toHaveProperty('keyword');
+    expect(keywords[0]).toHaveProperty('filters');
+  });
+
+  test('nao retornar keywords de outro usuario', () => {
+    db.addKeyword('user1', 'nike');
+    db.addKeyword('user2', 'adidas');
+
+    const keywords = db.listKeywordsWithId('user1');
+    expect(keywords).toHaveLength(1);
+    expect(keywords[0].keyword).toBe('nike');
+  });
+});
+
+describe('getKeywordByIdAndChat', () => {
+  test('retornar keyword pelo id e chat', () => {
+    db.addKeyword('user1', 'nike');
+    const keywords = db.listKeywordsWithId('user1');
+    const id = keywords[0].id;
+
+    const result = db.getKeywordByIdAndChat(id, 'user1');
+    expect(result).not.toBeNull();
+    expect(result.keyword).toBe('nike');
+    expect(result.id).toBe(id);
+  });
+
+  test('retornar null para id de outro usuario', () => {
+    db.addKeyword('user1', 'nike');
+    const keywords = db.listKeywordsWithId('user1');
+    const id = keywords[0].id;
+
+    expect(db.getKeywordByIdAndChat(id, 'user2')).toBeNull();
+  });
+
+  test('retornar null para id inexistente', () => {
+    expect(db.getKeywordByIdAndChat(99999, 'user1')).toBeNull();
+  });
+});
+
+describe('updateFilters', () => {
+  test('atualizar filtros de keyword', () => {
+    db.addKeyword('user1', 'nike');
+    const keywords = db.listKeywordsWithId('user1');
+    const id = keywords[0].id;
+
+    db.updateFilters(id, '{"used":true,"dep":"masculino"}');
+    const updated = db.getKeywordByIdAndChat(id, 'user1');
+    expect(updated.filters).toBe('{"used":true,"dep":"masculino"}');
+  });
+
+  test('limpar filtros com null', () => {
+    db.addKeyword('user1', 'nike');
+    const keywords = db.listKeywordsWithId('user1');
+    const id = keywords[0].id;
+
+    db.updateFilters(id, '{"used":true}');
+    db.updateFilters(id, null);
+    const updated = db.getKeywordByIdAndChat(id, 'user1');
+    expect(updated.filters).toBeNull();
   });
 });
 

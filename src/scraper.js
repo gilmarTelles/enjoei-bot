@@ -4,6 +4,21 @@ let browser = null;
 let launchTime = null;
 const BROWSER_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+function buildSearchUrl(keyword, filters) {
+  const params = new URLSearchParams();
+  params.set('q', keyword);
+
+  if (!filters) return `https://www.enjoei.com.br/s?${params.toString()}`;
+
+  if (filters.used) params.set('u', 'true');
+  if (filters.dep) params.set('dep', filters.dep);
+  if (filters.sr) params.set('sr', 'same_country');
+  if (filters.sz) params.set('size', filters.sz);
+  if (filters.sort) params.set('sort', filters.sort);
+
+  return `https://www.enjoei.com.br/s?${params.toString()}`;
+}
+
 async function launchBrowser() {
   // Restart browser if it's been running for over 24h
   if (browser && browser.connected && launchTime && (Date.now() - launchTime > BROWSER_MAX_AGE_MS)) {
@@ -48,7 +63,7 @@ async function launchBrowser() {
   return browser;
 }
 
-async function scrapePage(keyword) {
+async function scrapePage(keyword, filters) {
   const b = await launchBrowser();
   const page = await b.newPage();
 
@@ -58,8 +73,8 @@ async function scrapePage(keyword) {
     );
     await page.setViewport({ width: 1280, height: 900 });
 
-    const encoded = encodeURIComponent(keyword);
-    await page.goto(`https://www.enjoei.com.br/s?q=${encoded}`, {
+    const url = buildSearchUrl(keyword, filters);
+    await page.goto(url, {
       waitUntil: 'networkidle2',
       timeout: 60000,
     });
@@ -130,10 +145,10 @@ async function scrapePage(keyword) {
 
 const MAX_RETRIES = 2;
 
-async function searchProducts(keyword) {
+async function searchProducts(keyword, filters) {
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     try {
-      return await scrapePage(keyword);
+      return await scrapePage(keyword, filters);
     } catch (err) {
       console.error(`[scraper] Tentativa ${attempt} falhou para "${keyword}": ${err.message}`);
       if (attempt <= MAX_RETRIES) {
@@ -156,4 +171,4 @@ async function closeBrowser() {
   }
 }
 
-module.exports = { launchBrowser, searchProducts, closeBrowser };
+module.exports = { launchBrowser, searchProducts, closeBrowser, buildSearchUrl };

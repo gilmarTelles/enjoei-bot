@@ -41,6 +41,13 @@ function init() {
     // Column already exists — ignore
   }
 
+  // Migration: add filters column to keywords
+  try {
+    db.exec('ALTER TABLE keywords ADD COLUMN filters TEXT');
+  } catch (err) {
+    // Column already exists — ignore
+  }
+
   return db;
 }
 
@@ -62,11 +69,23 @@ function removeKeyword(chatId, keyword) {
 }
 
 function listKeywords(chatId) {
-  return db.prepare('SELECT keyword, max_price FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
+  return db.prepare('SELECT keyword, max_price, filters FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
+}
+
+function listKeywordsWithId(chatId) {
+  return db.prepare('SELECT id, keyword, max_price, filters FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
+}
+
+function getKeywordByIdAndChat(id, chatId) {
+  return db.prepare('SELECT id, keyword, max_price, filters FROM keywords WHERE id = ? AND chat_id = ?').get(id, chatId) || null;
+}
+
+function updateFilters(id, filtersJson) {
+  db.prepare('UPDATE keywords SET filters = ? WHERE id = ?').run(filtersJson, id);
 }
 
 function getAllUserKeywords() {
-  return db.prepare('SELECT DISTINCT chat_id, keyword, max_price FROM keywords').all();
+  return db.prepare('SELECT id, chat_id, keyword, max_price, filters FROM keywords').all();
 }
 
 function isProductSeen(productId, keyword, chatId) {
@@ -116,7 +135,8 @@ function getDb() {
 }
 
 module.exports = {
-  init, addKeyword, removeKeyword, listKeywords, getAllUserKeywords,
+  init, addKeyword, removeKeyword, listKeywords, listKeywordsWithId,
+  getKeywordByIdAndChat, updateFilters, getAllUserKeywords,
   isProductSeen, markProductSeen, getSeenProductPrice, updateSeenProductPrice,
   countKeywords, purgeOldProducts, backupDb, getDb,
 };
