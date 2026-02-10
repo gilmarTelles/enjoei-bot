@@ -7,8 +7,22 @@ function setCheckCallback(cb) {
   checkCallback = cb;
 }
 
+const ALLOWED_USERS = ['6397962194', '7653440251'];
+
+function isAllowed(msg) {
+  return ALLOWED_USERS.includes(msg.chat.id.toString());
+}
+
 function register(bot) {
+  bot.on('message', async (msg) => {
+    if (!isAllowed(msg) && msg.text && msg.text.startsWith('/')) {
+      await sendMessage(msg.chat.id.toString(), 'Acesso negado.');
+      return;
+    }
+  });
+
   bot.onText(/\/entrar/, async (msg) => {
+    if (!isAllowed(msg)) return;
     const chatId = msg.chat.id.toString();
     const added = db.addSubscriber(chatId);
     if (added) {
@@ -19,6 +33,7 @@ function register(bot) {
   });
 
   bot.onText(/\/sair/, async (msg) => {
+    if (!isAllowed(msg)) return;
     const chatId = msg.chat.id.toString();
     const removed = db.removeSubscriber(chatId);
     if (removed) {
@@ -29,6 +44,7 @@ function register(bot) {
   });
 
   bot.onText(/\/adicionar (.+)/, async (msg, match) => {
+    if (!isAllowed(msg)) return;
     const chatId = msg.chat.id.toString();
     const keyword = match[1].trim();
     const added = db.addKeyword(keyword);
@@ -40,6 +56,7 @@ function register(bot) {
   });
 
   bot.onText(/\/remover (.+)/, async (msg, match) => {
+    if (!isAllowed(msg)) return;
     const chatId = msg.chat.id.toString();
     const keyword = match[1].trim();
     const removed = db.removeKeyword(keyword);
@@ -51,6 +68,7 @@ function register(bot) {
   });
 
   bot.onText(/\/listar/, async (msg) => {
+    if (!isAllowed(msg)) return;
     const chatId = msg.chat.id.toString();
     const keywords = db.listKeywords();
     if (keywords.length === 0) {
@@ -62,6 +80,7 @@ function register(bot) {
   });
 
   bot.onText(/\/buscar/, async (msg) => {
+    if (!isAllowed(msg)) return;
     const chatId = msg.chat.id.toString();
     await sendMessage(chatId, 'Buscando agora...');
     if (checkCallback) {
@@ -75,6 +94,7 @@ function register(bot) {
   });
 
   bot.onText(/\/ajuda|\/start|\/help/, async (msg) => {
+    if (!isAllowed(msg)) return;
     const chatId = msg.chat.id.toString();
     await sendMessage(chatId, [
       '*Bot Enjoei - Comandos*',
