@@ -48,13 +48,53 @@ function init() {
     // Column already exists — ignore
   }
 
+  // Migration: add platform column to keywords (default 'enjoei')
+  try {
+    db.exec("ALTER TABLE keywords ADD COLUMN platform TEXT NOT NULL DEFAULT 'enjoei'");
+  } catch (err) {
+    // Column already exists — ignore
+  }
+
+  // Migration: add platform column to seen_products (default 'enjoei')
+  try {
+    db.exec("ALTER TABLE seen_products ADD COLUMN platform TEXT NOT NULL DEFAULT 'enjoei'");
+  } catch (err) {
+    // Column already exists — ignore
+  }
+
+  // Migration: recreate keywords table with UNIQUE(chat_id, keyword, platform) instead of UNIQUE(chat_id, keyword)
+  // Check if we need to migrate by inspecting existing unique index
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='keywords'").get();
+    if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('UNIQUE(chat_id, keyword, platform)')) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS keywords_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chat_id TEXT NOT NULL,
+          keyword TEXT NOT NULL,
+          created_at TEXT DEFAULT (datetime('now')),
+          max_price REAL,
+          filters TEXT,
+          platform TEXT NOT NULL DEFAULT 'enjoei',
+          UNIQUE(chat_id, keyword, platform)
+        );
+        INSERT OR IGNORE INTO keywords_new (id, chat_id, keyword, created_at, max_price, filters, platform)
+          SELECT id, chat_id, keyword, created_at, max_price, filters, platform FROM keywords;
+        DROP TABLE keywords;
+        ALTER TABLE keywords_new RENAME TO keywords;
+      `);
+    }
+  } catch (err) {
+    console.error('[db] Migration error (keywords unique constraint):', err.message);
+  }
+
   return db;
 }
 
-function addKeyword(chatId, keyword, maxPrice) {
+function addKeyword(chatId, keyword, maxPrice, platform = 'enjoei') {
   const normalized = keyword.toLowerCase().trim();
   try {
-    db.prepare('INSERT INTO keywords (chat_id, keyword, max_price) VALUES (?, ?, ?)').run(chatId, normalized, maxPrice || null);
+    db.prepare('INSERT INTO keywords (chat_id, keyword, max_price, platform) VALUES (?, ?, ?, ?)').run(chatId, normalized, maxPrice || null, platform);
     return true;
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return false;
@@ -62,22 +102,26 @@ function addKeyword(chatId, keyword, maxPrice) {
   }
 }
 
-function removeKeyword(chatId, keyword) {
+function removeKeyword(chatId, keyword, platform) {
   const normalized = keyword.toLowerCase().trim();
+  if (platform) {
+    const result = db.prepare('DELETE FROM keywords WHERE chat_id = ? AND keyword = ? AND platform = ?').run(chatId, normalized, platform);
+    return result.changes > 0;
+  }
   const result = db.prepare('DELETE FROM keywords WHERE chat_id = ? AND keyword = ?').run(chatId, normalized);
   return result.changes > 0;
 }
 
 function listKeywords(chatId) {
-  return db.prepare('SELECT keyword, max_price, filters FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
+  return db.prepare('SELECT keyword, max_price, filters, platform FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
 }
 
 function listKeywordsWithId(chatId) {
-  return db.prepare('SELECT id, keyword, max_price, filters FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
+  return db.prepare('SELECT id, keyword, max_price, filters, platform FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
 }
 
 function getKeywordByIdAndChat(id, chatId) {
-  return db.prepare('SELECT id, keyword, max_price, filters FROM keywords WHERE id = ? AND chat_id = ?').get(id, chatId) || null;
+  return db.prepare('SELECT id, keyword, max_price, filters, platform FROM keywords WHERE id = ? AND chat_id = ?').get(id, chatId) || null;
 }
 
 function updateFilters(id, filtersJson) {
@@ -85,31 +129,31 @@ function updateFilters(id, filtersJson) {
 }
 
 function getAllUserKeywords() {
-  return db.prepare('SELECT id, chat_id, keyword, max_price, filters FROM keywords').all();
+  return db.prepare('SELECT id, chat_id, keyword, max_price, filters, platform FROM keywords').all();
 }
 
-function isProductSeen(productId, keyword, chatId) {
-  const row = db.prepare('SELECT 1 FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ?').get(productId, keyword, chatId);
+function isProductSeen(productId, keyword, chatId, platform = 'enjoei') {
+  const row = db.prepare('SELECT 1 FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').get(productId, keyword, chatId, platform);
   return !!row;
 }
 
-function markProductSeen(product, keyword, chatId) {
+function markProductSeen(product, keyword, chatId, platform = 'enjoei') {
   try {
     db.prepare(
-      'INSERT INTO seen_products (product_id, keyword, chat_id, title, price, url) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(product.id, keyword, chatId, product.title, product.price, product.url);
+      'INSERT INTO seen_products (product_id, keyword, chat_id, title, price, url, platform) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(product.id, keyword, chatId, product.title, product.price, product.url, platform);
   } catch (err) {
     if (err.code !== 'SQLITE_CONSTRAINT_UNIQUE') throw err;
   }
 }
 
-function getSeenProductPrice(productId, keyword, chatId) {
-  const row = db.prepare('SELECT price FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ?').get(productId, keyword, chatId);
+function getSeenProductPrice(productId, keyword, chatId, platform = 'enjoei') {
+  const row = db.prepare('SELECT price FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').get(productId, keyword, chatId, platform);
   return row ? row.price : null;
 }
 
-function updateSeenProductPrice(productId, keyword, chatId, newPrice) {
-  db.prepare('UPDATE seen_products SET price = ? WHERE product_id = ? AND keyword = ? AND chat_id = ?').run(newPrice, productId, keyword, chatId);
+function updateSeenProductPrice(productId, keyword, chatId, newPrice, platform = 'enjoei') {
+  db.prepare('UPDATE seen_products SET price = ? WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').run(newPrice, productId, keyword, chatId, platform);
 }
 
 function countKeywords(chatId) {

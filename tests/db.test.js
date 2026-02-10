@@ -27,7 +27,7 @@ describe('Keywords', () => {
     expect(result).toBe(true);
   });
 
-  test('nao duplicar palavra-chave para mesmo usuario', () => {
+  test('nao duplicar palavra-chave para mesmo usuario e plataforma', () => {
     db.addKeyword('user1', 'nike');
     const result = db.addKeyword('user1', 'nike');
     expect(result).toBe(false);
@@ -89,20 +89,71 @@ describe('Keywords', () => {
     const keywords = db.listKeywords('user1');
     expect(keywords[0].max_price).toBeNull();
   });
+
+  test('adicionar com platform', () => {
+    db.addKeyword('user1', 'nike', null, 'ml');
+    const keywords = db.listKeywords('user1');
+    expect(keywords[0].platform).toBe('ml');
+  });
+
+  test('default platform is enjoei', () => {
+    db.addKeyword('user1', 'nike');
+    const keywords = db.listKeywords('user1');
+    expect(keywords[0].platform).toBe('enjoei');
+  });
+
+  test('same keyword on different platforms is allowed', () => {
+    const r1 = db.addKeyword('user1', 'nike', null, 'enjoei');
+    const r2 = db.addKeyword('user1', 'nike', null, 'ml');
+    const r3 = db.addKeyword('user1', 'nike', null, 'olx');
+    expect(r1).toBe(true);
+    expect(r2).toBe(true);
+    expect(r3).toBe(true);
+    expect(db.listKeywords('user1')).toHaveLength(3);
+  });
+
+  test('same keyword + same platform is duplicate', () => {
+    db.addKeyword('user1', 'nike', null, 'ml');
+    const result = db.addKeyword('user1', 'nike', null, 'ml');
+    expect(result).toBe(false);
+  });
+
+  test('removeKeyword with platform', () => {
+    db.addKeyword('user1', 'nike', null, 'enjoei');
+    db.addKeyword('user1', 'nike', null, 'ml');
+    db.removeKeyword('user1', 'nike', 'enjoei');
+    const keywords = db.listKeywords('user1');
+    expect(keywords).toHaveLength(1);
+    expect(keywords[0].platform).toBe('ml');
+  });
+
+  test('removeKeyword without platform removes all', () => {
+    db.addKeyword('user1', 'nike', null, 'enjoei');
+    db.addKeyword('user1', 'nike', null, 'ml');
+    db.removeKeyword('user1', 'nike');
+    expect(db.listKeywords('user1')).toHaveLength(0);
+  });
+
+  test('listKeywords retorna platform', () => {
+    db.addKeyword('user1', 'nike', null, 'ml');
+    const keywords = db.listKeywords('user1');
+    expect(keywords[0]).toHaveProperty('platform');
+    expect(keywords[0].platform).toBe('ml');
+  });
 });
 
 describe('getAllUserKeywords', () => {
-  test('retornar todos os pares usuario-keyword com max_price e id/filters', () => {
-    db.addKeyword('user1', 'nike', 150);
+  test('retornar todos os pares usuario-keyword com platform', () => {
+    db.addKeyword('user1', 'nike', 150, 'ml');
     db.addKeyword('user2', 'adidas');
-    db.addKeyword('user2', 'nike');
+    db.addKeyword('user2', 'nike', null, 'olx');
 
     const all = db.getAllUserKeywords();
     expect(all).toHaveLength(3);
     const nikeUser1 = all.find(k => k.chat_id === 'user1' && k.keyword === 'nike');
     expect(nikeUser1.max_price).toBe(150);
+    expect(nikeUser1.platform).toBe('ml');
     expect(nikeUser1).toHaveProperty('id');
-    expect(nikeUser1).toHaveProperty('filters');
   });
 
   test('retornar vazio quando nao tem keywords', () => {
@@ -111,8 +162,8 @@ describe('getAllUserKeywords', () => {
 });
 
 describe('listKeywordsWithId', () => {
-  test('retornar keywords com id', () => {
-    db.addKeyword('user1', 'nike');
+  test('retornar keywords com id e platform', () => {
+    db.addKeyword('user1', 'nike', null, 'ml');
     db.addKeyword('user1', 'adidas');
 
     const keywords = db.listKeywordsWithId('user1');
@@ -120,6 +171,7 @@ describe('listKeywordsWithId', () => {
     expect(keywords[0]).toHaveProperty('id');
     expect(keywords[0]).toHaveProperty('keyword');
     expect(keywords[0]).toHaveProperty('filters');
+    expect(keywords[0]).toHaveProperty('platform');
   });
 
   test('nao retornar keywords de outro usuario', () => {
@@ -134,13 +186,14 @@ describe('listKeywordsWithId', () => {
 
 describe('getKeywordByIdAndChat', () => {
   test('retornar keyword pelo id e chat', () => {
-    db.addKeyword('user1', 'nike');
+    db.addKeyword('user1', 'nike', null, 'ml');
     const keywords = db.listKeywordsWithId('user1');
     const id = keywords[0].id;
 
     const result = db.getKeywordByIdAndChat(id, 'user1');
     expect(result).not.toBeNull();
     expect(result.keyword).toBe('nike');
+    expect(result.platform).toBe('ml');
     expect(result.id).toBe(id);
   });
 
@@ -222,6 +275,17 @@ describe('Seen Products', () => {
     db.updateSeenProductPrice('produto-123', 'camiseta', 'user1', 'R$ 30');
     expect(db.getSeenProductPrice('produto-123', 'camiseta', 'user1')).toBe('R$ 30');
   });
+
+  test('isProductSeen with platform parameter', () => {
+    db.markProductSeen(product, 'camiseta', 'user1', 'ml');
+    expect(db.isProductSeen('produto-123', 'camiseta', 'user1', 'ml')).toBe(true);
+    expect(db.isProductSeen('produto-123', 'camiseta', 'user1', 'enjoei')).toBe(false);
+  });
+
+  test('markProductSeen with platform', () => {
+    db.markProductSeen(product, 'camiseta', 'user1', 'olx');
+    expect(db.isProductSeen('produto-123', 'camiseta', 'user1', 'olx')).toBe(true);
+  });
 });
 
 describe('countKeywords', () => {
@@ -233,6 +297,12 @@ describe('countKeywords', () => {
     expect(db.countKeywords('user1')).toBe(2);
     expect(db.countKeywords('user2')).toBe(1);
     expect(db.countKeywords('user3')).toBe(0);
+  });
+
+  test('contar inclui todas as plataformas', () => {
+    db.addKeyword('user1', 'nike', null, 'enjoei');
+    db.addKeyword('user1', 'nike', null, 'ml');
+    expect(db.countKeywords('user1')).toBe(2);
   });
 });
 

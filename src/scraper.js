@@ -1,23 +1,9 @@
 const puppeteer = require('puppeteer');
+const { getPlatform, DEFAULT_PLATFORM } = require('./platforms');
 
 let browser = null;
 let launchTime = null;
 const BROWSER_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-function buildSearchUrl(keyword, filters) {
-  const params = new URLSearchParams();
-  params.set('q', keyword);
-
-  if (!filters) return `https://www.enjoei.com.br/s?${params.toString()}`;
-
-  if (filters.used) params.set('u', 'true');
-  if (filters.dep) params.set('dep', filters.dep);
-  if (filters.sr) params.set('sr', 'same_country');
-  if (filters.sz) params.set('size', filters.sz);
-  if (filters.sort) params.set('sort', filters.sort);
-
-  return `https://www.enjoei.com.br/s?${params.toString()}`;
-}
 
 async function launchBrowser() {
   // Restart browser if it's been running for over 24h
@@ -63,99 +49,27 @@ async function launchBrowser() {
   return browser;
 }
 
-async function scrapePage(keyword, filters) {
-  const b = await launchBrowser();
-  const page = await b.newPage();
-
-  try {
-    await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-    );
-    await page.setViewport({ width: 1280, height: 900 });
-
-    const url = buildSearchUrl(keyword, filters);
-    await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 60000,
-    });
-
-    // Wait for product cards to render
-    await page.waitForSelector('.c-product-card', { timeout: 15000 }).catch(() => null);
-
-    // Small delay for any lazy-loaded content
-    await new Promise(r => setTimeout(r, 2000));
-
-    const products = await page.evaluate(() => {
-      const results = [];
-      const cards = document.querySelectorAll('.c-product-card');
-
-      for (const card of cards) {
-        const linkEl = card.querySelector('a[href*="/p/"]');
-        if (!linkEl) continue;
-
-        const href = linkEl.getAttribute('href') || '';
-        const match = href.match(/\/p\/(.+?)(?:\?|$)/);
-        if (!match) continue;
-
-        const productSlug = match[1];
-
-        // Title from h2 or data-test attribute
-        const titleEl = card.querySelector('[data-test="div-nome-prod"], h2.c-product-card__title');
-        const title = titleEl ? titleEl.textContent.trim() : productSlug;
-
-        // Price: get the current price (first non-discount span inside price container)
-        const priceContainer = card.querySelector('[data-test="div-preco"], .c-product-card__price');
-        let price = '';
-        if (priceContainer) {
-          const spans = priceContainer.querySelectorAll('span');
-          for (const span of spans) {
-            if (!span.classList.contains('c-product-card__price-discount') && !span.classList.contains('c-product-card__price')) {
-              const text = span.textContent.trim();
-              if (text.match(/R\$\s*[\d.,]+/)) {
-                price = text;
-                break;
-              }
-            }
-          }
-          if (!price) {
-            const priceMatch = priceContainer.textContent.match(/R\$\s*[\d.,]+/);
-            if (priceMatch) price = priceMatch[0];
-          }
-        }
-
-        // Product image
-        const imgEl = card.querySelector('img.c-product-card__img');
-        const image = imgEl ? imgEl.getAttribute('src') : '';
-
-        // Clean the URL (remove tracking params)
-        const cleanHref = href.split('?')[0];
-        const url = `https://www.enjoei.com.br${cleanHref}`;
-
-        results.push({ id: productSlug, title, price, url, image });
-      }
-
-      return results;
-    });
-
-    return products;
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
 const MAX_RETRIES = 2;
 
-async function searchProducts(keyword, filters) {
+async function searchProducts(keyword, filters, platform) {
+  const platformKey = platform || DEFAULT_PLATFORM;
+  const platformModule = getPlatform(platformKey);
+  if (!platformModule) {
+    console.error(`[scraper] Plataforma desconhecida: "${platformKey}"`);
+    return [];
+  }
+
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     try {
-      return await scrapePage(keyword, filters);
+      const b = await launchBrowser();
+      return await platformModule.scrapePage(b, keyword, filters);
     } catch (err) {
-      console.error(`[scraper] Tentativa ${attempt} falhou para "${keyword}": ${err.message}`);
+      console.error(`[scraper] Tentativa ${attempt} falhou para "${keyword}" (${platformModule.platformName}): ${err.message}`);
       if (attempt <= MAX_RETRIES) {
         // Wait before retry, longer on second retry
         await new Promise(r => setTimeout(r, attempt * 3000));
       } else {
-        console.error(`[scraper] Todas as tentativas falharam para "${keyword}"`);
+        console.error(`[scraper] Todas as tentativas falharam para "${keyword}" (${platformModule.platformName})`);
         return [];
       }
     }
@@ -169,6 +83,12 @@ async function closeBrowser() {
     browser = null;
     launchTime = null;
   }
+}
+
+// Backward compat: delegate to enjoei buildSearchUrl
+function buildSearchUrl(keyword, filters) {
+  const enjoei = getPlatform('enjoei');
+  return enjoei.buildSearchUrl(keyword, filters);
 }
 
 module.exports = { launchBrowser, searchProducts, closeBrowser, buildSearchUrl };

@@ -1,5 +1,6 @@
 const db = require('./db');
 const { sendMessage } = require('./telegram');
+const { getPlatform, resolvePlatformAlias, DEFAULT_PLATFORM } = require('./platforms');
 
 const MAX_KEYWORDS = 10;
 const KEYWORD_MIN_LEN = 2;
@@ -44,51 +45,50 @@ function parseFilters(filtersStr) {
   }
 }
 
-function formatFiltersSummary(filters) {
-  if (!filters || Object.keys(filters).length === 0) return '';
-  const parts = [];
-  if (filters.used) parts.push('usado');
-  if (filters.dep) parts.push(filters.dep);
-  if (filters.sz) parts.push(`tam: ${filters.sz.toUpperCase()}`);
-  if (filters.sr) parts.push('mesmo pais');
-  if (filters.sort === 'price_asc') parts.push('menor preco');
-  if (filters.sort === 'price_desc') parts.push('maior preco');
-  return parts.length > 0 ? ` [${parts.join(', ')}]` : '';
+function formatFiltersSummary(filters, platform) {
+  const platformKey = platform || DEFAULT_PLATFORM;
+  const platformModule = getPlatform(platformKey);
+  if (platformModule) {
+    return platformModule.formatFiltersSummary(filters);
+  }
+  return '';
+}
+
+/**
+ * Parse platform suffix from the argument string.
+ * The platform alias can appear:
+ *   - As the last word: "nike ml" -> keyword="nike", platform="ml"
+ *   - As the last word after price: "nike < 200 ml" -> keyword="nike", maxPrice=200, platform="ml"
+ * Only recognized if it resolves to a known platform alias.
+ */
+function parsePlatformFromArg(arg) {
+  if (!arg) return { keyword: '', platform: DEFAULT_PLATFORM };
+
+  const words = arg.trim().split(/\s+/);
+
+  // Check if last word is a platform alias (only if 2+ words)
+  if (words.length >= 2) {
+    const lastWord = words[words.length - 1].toLowerCase();
+    const resolved = resolvePlatformAlias(lastWord);
+    if (resolved) {
+      return {
+        keyword: words.slice(0, -1).join(' '),
+        platform: resolved,
+      };
+    }
+  }
+
+  return { keyword: arg, platform: DEFAULT_PLATFORM };
 }
 
 function buildFilterKeyboard(keywordRow) {
-  const filters = parseFilters(keywordRow.filters);
-  const id = keywordRow.id;
-
-  const usedLabel = filters.used ? '\u2705 Somente usados' : '\u274C Somente usados';
-  const depMLabel = filters.dep === 'masculino' ? '\u2705 Masculino' : '\u2B1C Masculino';
-  const depFLabel = filters.dep === 'feminino' ? '\u2705 Feminino' : '\u2B1C Feminino';
-  const srLabel = filters.sr ? '\u2705 Mesmo pais' : '\u274C Mesmo pais';
-  const sortALabel = filters.sort === 'price_asc' ? '\u2705 Menor preco' : '\u2B1C Menor preco';
-  const sortDLabel = filters.sort === 'price_desc' ? '\u2705 Maior preco' : '\u2B1C Maior preco';
-
-  const szLabels = { pp: 'PP', p: 'P', m: 'M', g: 'G', gg: 'GG' };
-  const szRow = Object.entries(szLabels).map(([key, label]) => ({
-    text: filters.sz === key ? `\u2705 ${label}` : `\u2B1C ${label}`,
-    callback_data: `f:${id}:sz:${key}`,
-  }));
-
-  return {
-    inline_keyboard: [
-      [{ text: usedLabel, callback_data: `f:${id}:used:t` }],
-      [
-        { text: depMLabel, callback_data: `f:${id}:dep:m` },
-        { text: depFLabel, callback_data: `f:${id}:dep:f` },
-      ],
-      szRow,
-      [{ text: srLabel, callback_data: `f:${id}:sr:t` }],
-      [
-        { text: sortALabel, callback_data: `f:${id}:sort:a` },
-        { text: sortDLabel, callback_data: `f:${id}:sort:d` },
-      ],
-      [{ text: '\uD83D\uDDD1 Limpar filtros', callback_data: `f:${id}:clr:0` }],
-    ],
-  };
+  const platform = keywordRow.platform || DEFAULT_PLATFORM;
+  const platformModule = getPlatform(platform);
+  if (platformModule) {
+    return platformModule.buildFilterKeyboard(keywordRow);
+  }
+  // Fallback to enjoei
+  return getPlatform('enjoei').buildFilterKeyboard(keywordRow);
 }
 
 async function showKeywordSelector(bot, chatId) {
@@ -101,10 +101,14 @@ async function showKeywordSelector(bot, chatId) {
     await showFilterKeyboard(bot, chatId, keywords[0]);
     return;
   }
-  const buttons = keywords.map(k => ([{
-    text: k.keyword,
-    callback_data: `fs:${k.id}`,
-  }]));
+  const buttons = keywords.map(k => {
+    const platformModule = getPlatform(k.platform || DEFAULT_PLATFORM);
+    const platformLabel = platformModule ? platformModule.platformName : k.platform;
+    return [{
+      text: `${k.keyword} (${platformLabel})`,
+      callback_data: `fs:${k.id}`,
+    }];
+  });
   await bot.sendMessage(chatId, 'Escolha a palavra-chave:', {
     reply_markup: { inline_keyboard: buttons },
   });
@@ -112,7 +116,9 @@ async function showKeywordSelector(bot, chatId) {
 
 async function showFilterKeyboard(bot, chatId, keywordRow) {
   const keyboard = buildFilterKeyboard(keywordRow);
-  await bot.sendMessage(chatId, `\u2699\uFE0F Filtros para "${keywordRow.keyword}":`, {
+  const platformModule = getPlatform(keywordRow.platform || DEFAULT_PLATFORM);
+  const platformLabel = platformModule ? platformModule.platformName : keywordRow.platform;
+  await bot.sendMessage(chatId, `\u2699\uFE0F Filtros para "${keywordRow.keyword}" (${platformLabel}):`, {
     reply_markup: keyboard,
   });
 }
@@ -139,14 +145,17 @@ function register(bot) {
       switch (command) {
         case '/adicionar': {
           if (!arg) {
-            await sendMessage(chatId, 'Uso: /adicionar <palavra> [< preco\\_max]\nExemplo: /adicionar nike air max\nExemplo: /adicionar nike < 200');
+            await sendMessage(chatId, 'Uso: /adicionar <palavra> [< preco\\_max] [plataforma]\nExemplo: /adicionar nike air max\nExemplo: /adicionar nike < 200\nExemplo: /adicionar nike ml\nExemplo: /adicionar nike < 200 olx\n\nPlataformas: enjoei (padrao), ml, olx');
             return;
           }
 
-          // Parse optional price filter: "nike air max < 200"
-          let keyword = arg;
+          // First, parse platform from the full arg (platform is last word)
+          const { keyword: argWithoutPlatform, platform } = parsePlatformFromArg(arg);
+
+          // Then parse optional price filter: "nike air max < 200"
+          let keyword = argWithoutPlatform;
           let maxPrice = null;
-          const priceMatch = arg.match(/^(.+?)\s*<\s*(\d+(?:[.,]\d+)?)\s*$/);
+          const priceMatch = argWithoutPlatform.match(/^(.+?)\s*<\s*(\d+(?:[.,]\d+)?)\s*$/);
           if (priceMatch) {
             keyword = priceMatch[1].trim();
             maxPrice = parseFloat(priceMatch[2].replace(',', '.'));
@@ -165,28 +174,36 @@ function register(bot) {
             await sendMessage(chatId, `Limite de ${MAX_KEYWORDS} palavras-chave atingido. Remova alguma com /remover.`);
             return;
           }
-          const added = db.addKeyword(chatId, keyword, maxPrice);
+          const platformModule = getPlatform(platform);
+          const platformLabel = platformModule ? platformModule.platformName : platform;
+          const added = db.addKeyword(chatId, keyword, maxPrice, platform);
           if (added) {
-            let confirmMsg = `Palavra-chave adicionada: "${keyword.toLowerCase()}"`;
+            let confirmMsg = `Palavra-chave adicionada: "${keyword.toLowerCase()}" (${platformLabel})`;
             if (maxPrice) confirmMsg += ` (max R$ ${maxPrice.toFixed(2).replace('.', ',')})`;
             confirmMsg += '\nUse /filtros para configurar filtros de busca.';
             await sendMessage(chatId, confirmMsg);
           } else {
-            await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" ja existe.`);
+            await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" ja existe no ${platformLabel}.`);
           }
           break;
         }
 
         case '/remover': {
           if (!arg) {
-            await sendMessage(chatId, 'Uso: /remover <palavra>\nExemplo: /remover nike air max');
+            await sendMessage(chatId, 'Uso: /remover <palavra> [plataforma]\nExemplo: /remover nike air max\nExemplo: /remover nike ml');
             return;
           }
-          const removed = db.removeKeyword(chatId, arg);
+          const { keyword: kw, platform: rmPlatform } = parsePlatformFromArg(arg);
+          // If platform was explicitly given, remove from that platform only
+          const platformGiven = rmPlatform !== DEFAULT_PLATFORM || resolvePlatformAlias(arg.trim().split(/\s+/).pop());
+          const removed = platformGiven
+            ? db.removeKeyword(chatId, kw, rmPlatform)
+            : db.removeKeyword(chatId, arg);
           if (removed) {
-            await sendMessage(chatId, `Palavra-chave removida: "${arg.toLowerCase()}"`);
+            const label = platformGiven ? ` (${getPlatform(rmPlatform)?.platformName || rmPlatform})` : '';
+            await sendMessage(chatId, `Palavra-chave removida: "${(platformGiven ? kw : arg).toLowerCase()}"${label}`);
           } else {
-            await sendMessage(chatId, `Palavra-chave "${arg.toLowerCase()}" nao encontrada.`);
+            await sendMessage(chatId, `Palavra-chave "${(platformGiven ? kw : arg).toLowerCase()}" nao encontrada.`);
           }
           break;
         }
@@ -197,9 +214,11 @@ function register(bot) {
             await sendMessage(chatId, 'Nenhuma palavra-chave configurada. Use /adicionar <palavra> para comecar.');
           } else {
             const list = keywords.map((k, i) => {
-              let line = `${i + 1}. ${k.keyword}`;
+              const platformModule = getPlatform(k.platform || DEFAULT_PLATFORM);
+              const platformLabel = platformModule ? platformModule.platformName : k.platform;
+              let line = `${i + 1}. ${k.keyword} (${platformLabel})`;
               if (k.max_price) line += ` (max R$ ${k.max_price.toFixed(2).replace('.', ',')})`;
-              const filtersSummary = formatFiltersSummary(parseFilters(k.filters));
+              const filtersSummary = formatFiltersSummary(parseFilters(k.filters), k.platform);
               if (filtersSummary) line += filtersSummary;
               return line;
             }).join('\n');
@@ -210,9 +229,16 @@ function register(bot) {
 
         case '/filtros': {
           if (arg) {
-            // Find keyword by name
+            // Find keyword by name (optionally with platform)
+            const { keyword: fkw, platform: fplatform } = parsePlatformFromArg(arg);
             const keywords = db.listKeywordsWithId(chatId);
-            const match = keywords.find(k => k.keyword === arg.toLowerCase().trim());
+            const platformGiven = fplatform !== DEFAULT_PLATFORM || resolvePlatformAlias(arg.trim().split(/\s+/).pop());
+            let match;
+            if (platformGiven) {
+              match = keywords.find(k => k.keyword === fkw.toLowerCase().trim() && k.platform === fplatform);
+            } else {
+              match = keywords.find(k => k.keyword === arg.toLowerCase().trim());
+            }
             if (!match) {
               await sendMessage(chatId, `Palavra-chave "${arg.toLowerCase()}" nao encontrada.`);
               return;
@@ -227,8 +253,28 @@ function register(bot) {
         case '/buscar': {
           await sendMessage(chatId, 'Buscando agora...');
           if (checkCallback) {
-            await checkCallback();
-            await sendMessage(chatId, 'Busca concluida.');
+            const summary = await checkCallback();
+            if (summary) {
+              const platformParts = [];
+              if (summary.byPlatform) {
+                for (const [key, count] of Object.entries(summary.byPlatform)) {
+                  if (count > 0) {
+                    const pm = getPlatform(key);
+                    platformParts.push(`${pm ? pm.platformName : key}: ${count}`);
+                  }
+                }
+              }
+              let summaryMsg = `Busca concluida: ${summary.totalNew} novo(s)`;
+              if (summary.totalPriceDrops > 0) {
+                summaryMsg += `, ${summary.totalPriceDrops} queda(s) de preco`;
+              }
+              if (platformParts.length > 0) {
+                summaryMsg += ` (${platformParts.join(', ')})`;
+              }
+              await sendMessage(chatId, summaryMsg);
+            } else {
+              await sendMessage(chatId, 'Busca concluida.');
+            }
           }
           break;
         }
@@ -254,16 +300,21 @@ function register(bot) {
         case '/start':
         case '/help': {
           await sendMessage(chatId, [
-            '*Bot Enjoei - Comandos*',
+            '*Bot de Buscas - Comandos*',
             '',
-            '/adicionar <palavra> — Adicionar palavra-chave',
+            '/adicionar <palavra> — Adicionar palavra-chave (Enjoei)',
+            '/adicionar <palavra> ml — Adicionar no Mercado Livre',
+            '/adicionar <palavra> olx — Adicionar na OLX',
             '/adicionar <palavra> < preco — Com filtro de preco',
-            '/remover <palavra> — Remover palavra-chave',
+            '/adicionar <palavra> < preco ml — Com preco no ML',
+            '/remover <palavra> [plataforma] — Remover palavra-chave',
             '/listar — Ver suas palavras-chave',
             '/filtros — Configurar filtros de busca',
             '/buscar — Buscar agora',
             '/status — Status da ultima verificacao',
             '/ajuda — Mostrar esta mensagem',
+            '',
+            'Plataformas: enjoei (padrao), ml (Mercado Livre), olx (OLX)',
           ].join('\n'));
           break;
         }
@@ -299,7 +350,9 @@ function register(bot) {
           return;
         }
         const keyboard = buildFilterKeyboard(keywordRow);
-        await bot.editMessageText(`\u2699\uFE0F Filtros para "${keywordRow.keyword}":`, {
+        const platformModule = getPlatform(keywordRow.platform || DEFAULT_PLATFORM);
+        const platformLabel = platformModule ? platformModule.platformName : keywordRow.platform;
+        await bot.editMessageText(`\u2699\uFE0F Filtros para "${keywordRow.keyword}" (${platformLabel}):`, {
           chat_id: chatId,
           message_id: messageId,
           reply_markup: keyboard,
@@ -310,10 +363,10 @@ function register(bot) {
 
       // Filter toggle: f:<id>:<type>:<value>
       if (data.startsWith('f:')) {
-        const parts = data.split(':');
-        const kwId = parseInt(parts[1], 10);
-        const filterType = parts[2];
-        const filterValue = parts[3];
+        const dataParts = data.split(':');
+        const kwId = parseInt(dataParts[1], 10);
+        const filterType = dataParts[2];
+        const filterValue = dataParts[3];
 
         const keywordRow = db.getKeywordByIdAndChat(kwId, chatId);
         if (!keywordRow) {
@@ -321,41 +374,16 @@ function register(bot) {
           return;
         }
 
-        const filters = parseFilters(keywordRow.filters);
+        const platform = keywordRow.platform || DEFAULT_PLATFORM;
+        const platformModule = getPlatform(platform);
 
         if (filterType === 'clr') {
           // Clear all filters
           db.updateFilters(kwId, null);
-        } else {
-          switch (filterType) {
-            case 'used':
-              filters.used = !filters.used;
-              if (!filters.used) delete filters.used;
-              break;
-            case 'dep': {
-              const depMap = { m: 'masculino', f: 'feminino' };
-              const newDep = depMap[filterValue];
-              filters.dep = filters.dep === newDep ? undefined : newDep;
-              if (!filters.dep) delete filters.dep;
-              break;
-            }
-            case 'sz':
-              filters.sz = filters.sz === filterValue ? undefined : filterValue;
-              if (!filters.sz) delete filters.sz;
-              break;
-            case 'sr':
-              filters.sr = !filters.sr;
-              if (!filters.sr) delete filters.sr;
-              break;
-            case 'sort': {
-              const sortMap = { a: 'price_asc', d: 'price_desc' };
-              const newSort = sortMap[filterValue];
-              filters.sort = filters.sort === newSort ? undefined : newSort;
-              if (!filters.sort) delete filters.sort;
-              break;
-            }
-          }
-          const json = Object.keys(filters).length > 0 ? JSON.stringify(filters) : null;
+        } else if (platformModule && platformModule.applyFilterToggle) {
+          const filters = parseFilters(keywordRow.filters);
+          const updated = platformModule.applyFilterToggle(filters, filterType, filterValue);
+          const json = Object.keys(updated).length > 0 ? JSON.stringify(updated) : null;
           db.updateFilters(kwId, json);
         }
 

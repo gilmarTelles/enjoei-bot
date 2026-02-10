@@ -6,6 +6,7 @@ const telegram = require('./telegram');
 const commands = require('./commands');
 const scraper = require('./scraper');
 const { notifyNewProducts, notifyPriceDrop } = require('./notifier');
+const { getPlatform, DEFAULT_PLATFORM } = require('./platforms');
 const { parsePrice } = commands;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -58,18 +59,18 @@ async function runCheck() {
   const allUserKeywords = db.getAllUserKeywords();
   if (allUserKeywords.length === 0) {
     console.log('[check] Nenhuma palavra-chave de nenhum usuario, pulando.');
-    return;
+    return { totalNew: 0, totalPriceDrops: 0, byPlatform: {} };
   }
 
-  // Group by keyword + filters combo to avoid duplicate scrapes
-  // Users with the same keyword AND same filters share a single scrape
+  // Group by platform + keyword + filters combo to avoid duplicate scrapes
   const scrapeGroupMap = {};
-  for (const { id, chat_id, keyword, max_price, filters } of allUserKeywords) {
+  for (const { id, chat_id, keyword, max_price, filters, platform } of allUserKeywords) {
+    const plat = platform || DEFAULT_PLATFORM;
     const parsedFilters = parseFiltersJson(filters);
     const filtersKey = parsedFilters ? JSON.stringify(parsedFilters) : '';
-    const groupKey = `${keyword}||${filtersKey}`;
+    const groupKey = `${plat}||${keyword}||${filtersKey}`;
     if (!scrapeGroupMap[groupKey]) {
-      scrapeGroupMap[groupKey] = { keyword, filters: parsedFilters, users: [] };
+      scrapeGroupMap[groupKey] = { keyword, filters: parsedFilters, platform: plat, users: [] };
     }
     scrapeGroupMap[groupKey].users.push({ chatId: chat_id, maxPrice: max_price });
   }
@@ -79,15 +80,19 @@ async function runCheck() {
 
   let totalNewProducts = 0;
   let totalPriceDrops = 0;
+  const byPlatform = {};
   let allEmpty = true;
 
   for (let i = 0; i < groups.length; i++) {
-    const { keyword, filters, users } = groups[i];
+    const { keyword, filters, platform, users } = groups[i];
+    const platformModule = getPlatform(platform);
+    const platformLabel = platformModule ? platformModule.platformName : platform;
+
     try {
       const filtersLabel = filters ? ` (filtros: ${JSON.stringify(filters)})` : '';
-      console.log(`[check] Buscando: "${keyword}"${filtersLabel}`);
-      const products = await scraper.searchProducts(keyword, filters);
-      console.log(`[check] ${products.length} produto(s) para "${keyword}"`);
+      console.log(`[check] Buscando: "${keyword}" [${platformLabel}]${filtersLabel}`);
+      const products = await scraper.searchProducts(keyword, filters, platform);
+      console.log(`[check] ${products.length} produto(s) para "${keyword}" [${platformLabel}]`);
 
       if (products.length > 0) allEmpty = false;
 
@@ -104,27 +109,29 @@ async function runCheck() {
 
         const newProducts = [];
         for (const product of filtered) {
-          if (!db.isProductSeen(product.id, keyword, chatId)) {
+          if (!db.isProductSeen(product.id, keyword, chatId, platform)) {
             newProducts.push(product);
-            db.markProductSeen(product, keyword, chatId);
+            db.markProductSeen(product, keyword, chatId, platform);
           } else {
             // Check for price drops on already-seen products
-            const oldPriceStr = db.getSeenProductPrice(product.id, keyword, chatId);
+            const oldPriceStr = db.getSeenProductPrice(product.id, keyword, chatId, platform);
             const oldPrice = parsePrice(oldPriceStr);
             const newPrice = parsePrice(product.price);
             if (oldPrice && newPrice && newPrice < oldPrice) {
-              console.log(`[check] Queda de preco: "${product.id}" ${oldPriceStr} -> ${product.price}`);
-              db.updateSeenProductPrice(product.id, keyword, chatId, product.price);
-              await notifyPriceDrop(product, keyword, chatId, oldPriceStr, product.price);
+              console.log(`[check] Queda de preco: "${product.id}" ${oldPriceStr} -> ${product.price} [${platformLabel}]`);
+              db.updateSeenProductPrice(product.id, keyword, chatId, product.price, platform);
+              await notifyPriceDrop(product, keyword, chatId, oldPriceStr, product.price, platform);
               totalPriceDrops++;
+              byPlatform[platform] = (byPlatform[platform] || 0);
             }
           }
         }
 
         if (newProducts.length > 0) {
-          console.log(`[check] ${newProducts.length} novo(s) para "${keyword}" -> usuario ${chatId}`);
+          console.log(`[check] ${newProducts.length} novo(s) para "${keyword}" [${platformLabel}] -> usuario ${chatId}`);
           totalNewProducts += newProducts.length;
-          await notifyNewProducts(newProducts, keyword, chatId);
+          byPlatform[platform] = (byPlatform[platform] || 0) + newProducts.length;
+          await notifyNewProducts(newProducts, keyword, chatId, platform);
         }
       }
 
@@ -133,8 +140,9 @@ async function runCheck() {
         await new Promise(r => setTimeout(r, SCRAPE_DELAY_MS));
       }
     } catch (err) {
-      console.error(`[check] Erro em "${keyword}":`, err.message);
-      await notifyAdmin(`Erro ao buscar "${keyword}": ${err.message}`);
+      // Platform-isolated error: warn admin but continue with other platforms/keywords
+      console.error(`[check] Erro em "${keyword}" [${platformLabel}]:`, err.message);
+      await notifyAdmin(`Erro ao buscar "${keyword}" [${platformLabel}]: ${err.message}`);
     }
   }
 
@@ -143,7 +151,7 @@ async function runCheck() {
     consecutiveEmptyChecks++;
     console.warn(`[check] Todas as buscas vazias (${consecutiveEmptyChecks}x consecutivas)`);
     if (consecutiveEmptyChecks >= STALE_THRESHOLD) {
-      await notifyAdmin(`ALERTA: ${consecutiveEmptyChecks} verificacoes consecutivas sem resultados. Os seletores CSS do enjoei podem ter mudado!`);
+      await notifyAdmin(`ALERTA: ${consecutiveEmptyChecks} verificacoes consecutivas sem resultados. Os seletores CSS podem ter mudado!`);
     }
   } else {
     consecutiveEmptyChecks = 0;
@@ -160,10 +168,12 @@ async function runCheck() {
   });
 
   console.log(`[check] Concluido. ${totalNewProducts} novo(s), ${totalPriceDrops} queda(s) de preco.`);
+
+  return { totalNew: totalNewProducts, totalPriceDrops, byPlatform };
 }
 
 async function main() {
-  console.log('[bot] Iniciando Bot Enjoei (Telegram)...');
+  console.log('[bot] Iniciando Bot de Buscas (Telegram)...');
 
   db.init();
   console.log('[bot] Banco de dados inicializado.');

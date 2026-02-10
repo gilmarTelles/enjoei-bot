@@ -1,19 +1,24 @@
 const { buildSearchUrl } = require('../src/scraper');
 
-describe('buildSearchUrl', () => {
+describe('buildSearchUrl (backward compat - delegates to enjoei)', () => {
   test('URL basica sem filtros', () => {
     const url = buildSearchUrl('nike', null);
-    expect(url).toBe('https://www.enjoei.com.br/s?q=nike');
+    expect(url).toContain('https://www.enjoei.com.br/s?');
+    expect(url).toContain('q=nike');
+    // Default lp=24h
+    expect(url).toContain('lp=24h');
   });
 
   test('URL basica com filtros undefined', () => {
     const url = buildSearchUrl('nike', undefined);
-    expect(url).toBe('https://www.enjoei.com.br/s?q=nike');
+    expect(url).toContain('https://www.enjoei.com.br/s?');
+    expect(url).toContain('q=nike');
   });
 
   test('URL basica com filtros vazio', () => {
     const url = buildSearchUrl('nike', {});
-    expect(url).toBe('https://www.enjoei.com.br/s?q=nike');
+    expect(url).toContain('https://www.enjoei.com.br/s?');
+    expect(url).toContain('q=nike');
   });
 
   test('URL com filtro usado', () => {
@@ -76,6 +81,9 @@ describe('buildSearchUrl', () => {
 
   test('URL nao inclui parametros para filtros false/undefined', () => {
     const url = buildSearchUrl('nike', { used: false, dep: undefined, sr: false });
-    expect(url).toBe('https://www.enjoei.com.br/s?q=nike');
+    expect(url).toContain('q=nike');
+    expect(url).not.toContain('u=true');
+    expect(url).not.toContain('dep=');
+    expect(url).not.toContain('sr=');
   });
 });
