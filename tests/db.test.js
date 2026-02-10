@@ -19,6 +19,7 @@ beforeEach(() => {
   const instance = db.getDb();
   instance.exec('DELETE FROM keywords');
   instance.exec('DELETE FROM seen_products');
+  instance.exec('DELETE FROM user_settings');
 });
 
 describe('Keywords', () => {
@@ -318,5 +319,28 @@ describe('purgeOldProducts', () => {
     expect(purged).toBe(1);
     expect(db.isProductSeen('old-product', 'nike', 'user1')).toBe(false);
     expect(db.isProductSeen('new-product', 'nike', 'user1')).toBe(true);
+  });
+});
+
+describe('setPaused / isPaused', () => {
+  test('isPaused retorna false por padrao (sem registro)', () => {
+    expect(db.isPaused('user1')).toBe(false);
+  });
+
+  test('setPaused(true) faz isPaused retornar true', () => {
+    db.setPaused('user1', true);
+    expect(db.isPaused('user1')).toBe(true);
+  });
+
+  test('setPaused(false) faz isPaused retornar false', () => {
+    db.setPaused('user1', true);
+    db.setPaused('user1', false);
+    expect(db.isPaused('user1')).toBe(false);
+  });
+
+  test('nao afeta outros usuarios', () => {
+    db.setPaused('user1', true);
+    expect(db.isPaused('user1')).toBe(true);
+    expect(db.isPaused('user2')).toBe(false);
   });
 });

@@ -55,6 +55,7 @@ beforeEach(() => {
   const instance = db.getDb();
   instance.exec('DELETE FROM keywords');
   instance.exec('DELETE FROM seen_products');
+  instance.exec('DELETE FROM user_settings');
   telegram.sendMessage.mockClear();
 });
 
@@ -342,6 +343,53 @@ describe('Commands', () => {
     await bot.simulate(ALLOWED, '/buscar');
     const summaryMsg = telegram.sendMessage.mock.calls[1][1];
     expect(summaryMsg).toContain('0 novo(s)');
+  });
+});
+
+describe('/parar and /retomar commands', () => {
+  const ALLOWED = '6397962194';
+
+  test('/parar envia confirmacao e pausa', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/parar');
+    expect(telegram.sendMessage).toHaveBeenCalledWith(ALLOWED, 'Notificacoes pausadas. Use /retomar para reativar.');
+    expect(db.isPaused(ALLOWED)).toBe(true);
+  });
+
+  test('/retomar envia confirmacao e reativa', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    db.setPaused(ALLOWED, true);
+    await bot.simulate(ALLOWED, '/retomar');
+    expect(telegram.sendMessage).toHaveBeenCalledWith(ALLOWED, 'Notificacoes reativadas.');
+    expect(db.isPaused(ALLOWED)).toBe(false);
+  });
+
+  test('/status mostra notificacoes ativas por padrao', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/status');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('Notificacoes: ativas');
+  });
+
+  test('/status mostra notificacoes pausadas quando pausado', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    db.setPaused(ALLOWED, true);
+    await bot.simulate(ALLOWED, '/status');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('Notificacoes: pausadas');
+  });
+
+  test('/ajuda inclui /parar e /retomar', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/ajuda');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('/parar');
+    expect(msg).toContain('/retomar');
   });
 });
 

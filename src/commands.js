@@ -279,9 +279,27 @@ function register(bot) {
           break;
         }
 
+        case '/parar': {
+          db.setPaused(chatId, true);
+          await sendMessage(chatId, 'Notificacoes pausadas. Use /retomar para reativar.');
+          break;
+        }
+
+        case '/retomar': {
+          db.setPaused(chatId, false);
+          await sendMessage(chatId, 'Notificacoes reativadas.');
+          break;
+        }
+
         case '/status': {
+          const paused = db.isPaused(chatId);
           if (!statusData) {
-            await sendMessage(chatId, 'Nenhuma verificacao realizada ainda.');
+            const lines = [
+              'Nenhuma verificacao realizada ainda.',
+              '',
+              `Notificacoes: ${paused ? 'pausadas' : 'ativas'}`,
+            ];
+            await sendMessage(chatId, lines.join('\n'));
           } else {
             const lines = [
               '*Status do Bot*',
@@ -290,6 +308,8 @@ function register(bot) {
               `Palavras-chave verificadas: ${statusData.keywordsChecked}`,
               `Novos produtos encontrados: ${statusData.newProductsFound}`,
               `Quedas de preco detectadas: ${statusData.priceDrops}`,
+              '',
+              `Notificacoes: ${paused ? 'pausadas' : 'ativas'}`,
             ];
             await sendMessage(chatId, lines.join('\n'));
           }
@@ -311,6 +331,8 @@ function register(bot) {
             '/listar — Ver suas palavras-chave',
             '/filtros — Configurar filtros de busca',
             '/buscar — Buscar agora',
+            '/parar — Pausar notificacoes',
+            '/retomar — Retomar notificacoes',
             '/status — Status da ultima verificacao',
             '/ajuda — Mostrar esta mensagem',
             '',

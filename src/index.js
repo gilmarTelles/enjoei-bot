@@ -62,9 +62,21 @@ async function runCheck() {
     return { totalNew: 0, totalPriceDrops: 0, byPlatform: {} };
   }
 
+  // Filter out keywords belonging to paused users
+  const pausedSet = new Set();
+  const chatIds = [...new Set(allUserKeywords.map(k => k.chat_id))];
+  for (const cid of chatIds) {
+    if (db.isPaused(cid)) pausedSet.add(cid);
+  }
+  const activeKeywords = allUserKeywords.filter(k => !pausedSet.has(k.chat_id));
+  if (activeKeywords.length === 0) {
+    console.log('[check] Todos os usuarios estao pausados, pulando.');
+    return { totalNew: 0, totalPriceDrops: 0, byPlatform: {} };
+  }
+
   // Group by platform + keyword + filters combo to avoid duplicate scrapes
   const scrapeGroupMap = {};
-  for (const { id, chat_id, keyword, max_price, filters, platform } of allUserKeywords) {
+  for (const { id, chat_id, keyword, max_price, filters, platform } of activeKeywords) {
     const plat = platform || DEFAULT_PLATFORM;
     const parsedFilters = parseFiltersJson(filters);
     const filtersKey = parsedFilters ? JSON.stringify(parsedFilters) : '';

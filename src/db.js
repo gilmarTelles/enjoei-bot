@@ -32,6 +32,11 @@ function init() {
       first_seen_at TEXT DEFAULT (datetime('now')),
       UNIQUE(product_id, keyword, chat_id)
     );
+
+    CREATE TABLE IF NOT EXISTS user_settings (
+      chat_id TEXT PRIMARY KEY,
+      paused INTEGER NOT NULL DEFAULT 0
+    );
   `);
 
   // Migration: add max_price column to keywords
@@ -174,6 +179,15 @@ function backupDb() {
   return backupPath;
 }
 
+function setPaused(chatId, paused) {
+  db.prepare('INSERT OR REPLACE INTO user_settings (chat_id, paused) VALUES (?, ?)').run(chatId, paused ? 1 : 0);
+}
+
+function isPaused(chatId) {
+  const row = db.prepare('SELECT paused FROM user_settings WHERE chat_id = ?').get(chatId);
+  return row ? row.paused === 1 : false;
+}
+
 function getDb() {
   return db;
 }
@@ -183,4 +197,5 @@ module.exports = {
   getKeywordByIdAndChat, updateFilters, getAllUserKeywords,
   isProductSeen, markProductSeen, getSeenProductPrice, updateSeenProductPrice,
   countKeywords, purgeOldProducts, backupDb, getDb,
+  setPaused, isPaused,
 };
