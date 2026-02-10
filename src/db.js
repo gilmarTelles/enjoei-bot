@@ -67,6 +67,33 @@ function init() {
     // Column already exists — ignore
   }
 
+  // Migration: recreate seen_products with UNIQUE(product_id, keyword, chat_id, platform)
+  try {
+    const spInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='seen_products'").get();
+    if (spInfo && spInfo.sql && !spInfo.sql.includes('UNIQUE(product_id, keyword, chat_id, platform)')) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS seen_products_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          product_id TEXT NOT NULL,
+          keyword TEXT NOT NULL,
+          chat_id TEXT NOT NULL,
+          title TEXT,
+          price TEXT,
+          url TEXT,
+          first_seen_at TEXT DEFAULT (datetime('now')),
+          platform TEXT NOT NULL DEFAULT 'enjoei',
+          UNIQUE(product_id, keyword, chat_id, platform)
+        );
+        INSERT OR IGNORE INTO seen_products_new (id, product_id, keyword, chat_id, title, price, url, first_seen_at, platform)
+          SELECT id, product_id, keyword, chat_id, title, price, url, first_seen_at, platform FROM seen_products;
+        DROP TABLE seen_products;
+        ALTER TABLE seen_products_new RENAME TO seen_products;
+      `);
+    }
+  } catch (err) {
+    console.error('[db] Migration error (seen_products unique constraint):', err.message);
+  }
+
   // Migration: recreate keywords table with UNIQUE(chat_id, keyword, platform) instead of UNIQUE(chat_id, keyword)
   // Check if we need to migrate by inspecting existing unique index
   try {
@@ -92,6 +119,21 @@ function init() {
   } catch (err) {
     console.error('[db] Migration error (keywords unique constraint):', err.message);
   }
+
+  // Migration: watched_products table for individual price monitoring
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS watched_products (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      title TEXT,
+      url TEXT,
+      last_price TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(chat_id, product_id, platform)
+    );
+  `);
 
   return db;
 }
@@ -192,10 +234,56 @@ function getDb() {
   return db;
 }
 
+function getSeenProductRowId(productId, keyword, chatId, platform = 'enjoei') {
+  const row = db.prepare('SELECT id FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').get(productId, keyword, chatId, platform);
+  return row ? row.id : null;
+}
+
+function getSeenProductById(id) {
+  return db.prepare('SELECT * FROM seen_products WHERE id = ?').get(id) || null;
+}
+
+function addWatchedProduct(chatId, productId, platform, title, url, lastPrice) {
+  try {
+    db.prepare(
+      'INSERT OR IGNORE INTO watched_products (chat_id, product_id, platform, title, url, last_price) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(chatId, productId, platform, title, url, lastPrice);
+    return true;
+  } catch (err) {
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return false;
+    throw err;
+  }
+}
+
+function removeWatchedProduct(id, chatId) {
+  const result = db.prepare('DELETE FROM watched_products WHERE id = ? AND chat_id = ?').run(id, chatId);
+  return result.changes > 0;
+}
+
+function isProductWatched(chatId, productId, platform) {
+  const row = db.prepare('SELECT 1 FROM watched_products WHERE chat_id = ? AND product_id = ? AND platform = ?').get(chatId, productId, platform);
+  return !!row;
+}
+
+function listWatchedProducts(chatId) {
+  return db.prepare('SELECT * FROM watched_products WHERE chat_id = ? ORDER BY created_at').all(chatId);
+}
+
+function getAllWatchedProducts() {
+  return db.prepare('SELECT * FROM watched_products').all();
+}
+
+function updateWatchedProductPrice(id, newPrice) {
+  db.prepare('UPDATE watched_products SET last_price = ? WHERE id = ?').run(newPrice, id);
+}
+
 module.exports = {
   init, addKeyword, removeKeyword, listKeywords, listKeywordsWithId,
   getKeywordByIdAndChat, updateFilters, getAllUserKeywords,
   isProductSeen, markProductSeen, getSeenProductPrice, updateSeenProductPrice,
   countKeywords, purgeOldProducts, backupDb, getDb,
   setPaused, isPaused,
+  getSeenProductRowId, getSeenProductById,
+  addWatchedProduct, removeWatchedProduct, isProductWatched,
+  listWatchedProducts, getAllWatchedProducts, updateWatchedProductPrice,
 };

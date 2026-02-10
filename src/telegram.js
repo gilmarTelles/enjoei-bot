@@ -8,21 +8,21 @@ function init(token) {
   return bot;
 }
 
-async function sendMessage(chatId, text) {
+async function sendMessage(chatId, text, extra = {}) {
   try {
-    await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    await bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...extra });
   } catch (err) {
     console.error('[telegram] Erro ao enviar mensagem:', err.message);
   }
 }
 
-async function sendPhoto(chatId, imageUrl, caption) {
+async function sendPhoto(chatId, imageUrl, caption, extra = {}) {
   try {
-    await bot.sendPhoto(chatId, imageUrl, { caption, parse_mode: 'Markdown' });
+    await bot.sendPhoto(chatId, imageUrl, { caption, parse_mode: 'Markdown', ...extra });
   } catch (err) {
     console.error('[telegram] Erro ao enviar foto:', err.message);
     // Fallback to text message if photo fails
-    await sendMessage(chatId, caption);
+    await sendMessage(chatId, caption, extra);
   }
 }
 

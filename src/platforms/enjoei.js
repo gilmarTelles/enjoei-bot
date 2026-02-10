@@ -102,6 +102,57 @@ async function scrapePage(browser, keyword, filters) {
   }
 }
 
+async function scrapeProductPrice(browser, url) {
+  const page = await browser.newPage();
+  try {
+    await page.setUserAgent(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    );
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    await new Promise(r => setTimeout(r, 2000));
+
+    const price = await page.evaluate(() => {
+      // Platform-specific selectors
+      const selectors = ['[data-test="div-preco"]', '.ProductPage__price'];
+      for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+          const match = el.textContent.match(/R\$\s*[\d.,]+/);
+          if (match) return match[0];
+        }
+      }
+      // Fallback: meta tag
+      const meta = document.querySelector('meta[property="product:price:amount"]');
+      if (meta) {
+        const amount = meta.getAttribute('content');
+        if (amount) return `R$ ${amount}`;
+      }
+      // Fallback: JSON-LD
+      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+      for (const script of scripts) {
+        try {
+          const data = JSON.parse(script.textContent);
+          if (data['@type'] === 'Product' && data.offers) {
+            const p = data.offers.price || (data.offers[0] && data.offers[0].price);
+            if (p) return `R$ ${p}`;
+          }
+        } catch {}
+      }
+      // Fallback: regex on body
+      const bodyMatch = document.body.innerText.match(/R\$\s*[\d.,]+/);
+      return bodyMatch ? bodyMatch[0] : null;
+    });
+
+    return price;
+  } catch (err) {
+    console.error(`[enjoei] scrapeProductPrice failed for ${url}: ${err.message}`);
+    return null;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
 function parseFilters(filtersStr) {
   if (!filtersStr) return {};
   try {
@@ -223,6 +274,7 @@ module.exports = {
   platformName,
   buildSearchUrl,
   scrapePage,
+  scrapeProductPrice,
   buildFilterKeyboard,
   applyFilterToggle,
   formatFiltersSummary,

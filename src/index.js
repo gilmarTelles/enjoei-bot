@@ -7,6 +7,7 @@ const commands = require('./commands');
 const scraper = require('./scraper');
 const { notifyNewProducts, notifyPriceDrop } = require('./notifier');
 const { getPlatform, DEFAULT_PLATFORM } = require('./platforms');
+const { filterByRelevance } = require('./relevanceFilter');
 const { parsePrice } = commands;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -119,11 +120,22 @@ async function runCheck() {
           });
         }
 
+        // AI relevance filter
+        try {
+          filtered = await filterByRelevance(filtered, keyword);
+        } catch (err) {
+          console.error(`[check] Erro no filtro de relevancia: ${err.message}`);
+          await notifyAdmin(`Erro no filtro de relevancia para "${keyword}": ${err.message}`);
+        }
+
         const newProducts = [];
+        const seenIds = [];
         for (const product of filtered) {
           if (!db.isProductSeen(product.id, keyword, chatId, platform)) {
             newProducts.push(product);
             db.markProductSeen(product, keyword, chatId, platform);
+            const rowId = db.getSeenProductRowId(product.id, keyword, chatId, platform);
+            seenIds.push(rowId);
           } else {
             // Check for price drops on already-seen products
             const oldPriceStr = db.getSeenProductPrice(product.id, keyword, chatId, platform);
@@ -143,7 +155,7 @@ async function runCheck() {
           console.log(`[check] ${newProducts.length} novo(s) para "${keyword}" [${platformLabel}] -> usuario ${chatId}`);
           totalNewProducts += newProducts.length;
           byPlatform[platform] = (byPlatform[platform] || 0) + newProducts.length;
-          await notifyNewProducts(newProducts, keyword, chatId, platform);
+          await notifyNewProducts(newProducts, keyword, chatId, platform, seenIds);
         }
       }
 
@@ -184,6 +196,62 @@ async function runCheck() {
   return { totalNew: totalNewProducts, totalPriceDrops, byPlatform };
 }
 
+async function runWatchCheck() {
+  const allWatched = db.getAllWatchedProducts();
+  if (allWatched.length === 0) {
+    console.log('[watch] Nenhum produto monitorado, pulando.');
+    return;
+  }
+
+  // Group by URL to avoid scraping the same product page multiple times
+  const byUrl = {};
+  for (const w of allWatched) {
+    if (!byUrl[w.url]) {
+      byUrl[w.url] = { platform: w.platform, watchers: [] };
+    }
+    byUrl[w.url].watchers.push(w);
+  }
+
+  const urls = Object.keys(byUrl);
+  console.log(`[watch] Verificando ${urls.length} produto(s) monitorado(s)...`);
+
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    const { platform, watchers } = byUrl[url];
+
+    try {
+      const scrapedPrice = await scraper.scrapeProductPrice(url, platform);
+      if (!scrapedPrice) {
+        console.log(`[watch] Nao foi possivel obter preco de ${url}`);
+        continue;
+      }
+
+      for (const w of watchers) {
+        const oldPrice = parsePrice(w.last_price);
+        const newPrice = parsePrice(scrapedPrice);
+
+        if (oldPrice && newPrice && newPrice < oldPrice) {
+          console.log(`[watch] Queda de preco detectada: "${w.title}" ${w.last_price} -> ${scrapedPrice}`);
+          const product = { id: w.product_id, title: w.title, url: w.url, image: null };
+          await notifyPriceDrop(product, '', w.chat_id, w.last_price, scrapedPrice, w.platform, w.id);
+        }
+
+        // Always update to latest price
+        db.updateWatchedProductPrice(w.id, scrapedPrice);
+      }
+    } catch (err) {
+      console.error(`[watch] Erro ao verificar ${url}:`, err.message);
+    }
+
+    // Rate limiting between scrapes
+    if (i < urls.length - 1) {
+      await new Promise(r => setTimeout(r, SCRAPE_DELAY_MS));
+    }
+  }
+
+  console.log(`[watch] Verificacao de precos monitorados concluida.`);
+}
+
 async function main() {
   console.log('[bot] Iniciando Bot de Buscas (Telegram)...');
 
@@ -205,6 +273,13 @@ async function main() {
     runCheck().catch(err => console.error('[cron] Erro:', err.message));
   });
   console.log(`[bot] Verificacoes agendadas a cada ${CHECK_INTERVAL} minutos.`);
+
+  // Watch check: scrape individual product pages for price drops every 30 minutes
+  cron.schedule('*/30 * * * *', () => {
+    console.log('[cron] Verificacao de precos monitorados');
+    runWatchCheck().catch(err => console.error('[cron] Erro watch check:', err.message));
+  });
+  console.log('[bot] Verificacao de precos monitorados agendada (30 min).');
 
   // Daily maintenance at 4 AM: purge old products + backup DB
   cron.schedule('0 4 * * *', () => {

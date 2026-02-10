@@ -77,6 +77,31 @@ async function searchProducts(keyword, filters, platform) {
   return [];
 }
 
+async function scrapeProductPrice(url, platform) {
+  const platformKey = platform || DEFAULT_PLATFORM;
+  const platformModule = getPlatform(platformKey);
+  if (!platformModule || !platformModule.scrapeProductPrice) {
+    console.error(`[scraper] scrapeProductPrice nao disponivel para "${platformKey}"`);
+    return null;
+  }
+
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    try {
+      const b = await launchBrowser();
+      return await platformModule.scrapeProductPrice(b, url);
+    } catch (err) {
+      console.error(`[scraper] scrapeProductPrice tentativa ${attempt} falhou para ${url} (${platformKey}): ${err.message}`);
+      if (attempt <= MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, attempt * 3000));
+      } else {
+        console.error(`[scraper] Todas as tentativas de scrapeProductPrice falharam para ${url}`);
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 async function closeBrowser() {
   if (browser) {
     await browser.close().catch(() => {});
@@ -91,4 +116,4 @@ function buildSearchUrl(keyword, filters) {
   return enjoei.buildSearchUrl(keyword, filters);
 }
 
-module.exports = { launchBrowser, searchProducts, closeBrowser, buildSearchUrl };
+module.exports = { launchBrowser, searchProducts, scrapeProductPrice, closeBrowser, buildSearchUrl };
