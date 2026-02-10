@@ -28,6 +28,28 @@ function register(bot) {
     }
   });
 
+  bot.onText(/\/adicionar (.+)/, async (msg, match) => {
+    const chatId = msg.chat.id.toString();
+    const keyword = match[1].trim();
+    const added = db.addKeyword(keyword);
+    if (added) {
+      await sendMessage(chatId, `Palavra-chave adicionada: "${keyword.toLowerCase()}"`);
+    } else {
+      await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" ja existe.`);
+    }
+  });
+
+  bot.onText(/\/remover (.+)/, async (msg, match) => {
+    const chatId = msg.chat.id.toString();
+    const keyword = match[1].trim();
+    const removed = db.removeKeyword(keyword);
+    if (removed) {
+      await sendMessage(chatId, `Palavra-chave removida: "${keyword.toLowerCase()}"`);
+    } else {
+      await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" nao encontrada.`);
+    }
+  });
+
   bot.onText(/\/listar/, async (msg) => {
     const chatId = msg.chat.id.toString();
     const keywords = db.listKeywords();
@@ -59,6 +81,8 @@ function register(bot) {
       '',
       '/entrar — Receber alertas de novos itens',
       '/sair — Parar de receber alertas',
+      '/adicionar <palavra> — Adicionar palavra-chave',
+      '/remover <palavra> — Remover palavra-chave',
       '/listar — Ver palavras-chave monitoradas',
       '/buscar — Buscar agora',
       '/ajuda — Mostrar esta mensagem',
