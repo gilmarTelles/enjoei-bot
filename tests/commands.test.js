@@ -149,4 +149,30 @@ describe('Commands', () => {
     await bot.simulate(ALLOWED, 'ola mundo');
     expect(telegram.sendMessage).not.toHaveBeenCalled();
   });
+
+  test('/adicionar palavra muito curta', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/adicionar a');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('muito curta');
+  });
+
+  test('/adicionar palavra muito longa', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    const longWord = 'a'.repeat(51);
+    await bot.simulate(ALLOWED, `/adicionar ${longWord}`);
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('muito longa');
+  });
+
+  test('/adicionar limite de palavras-chave', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    for (let i = 1; i <= 10; i++) {
+      await bot.simulate(ALLOWED, `/adicionar palavra${i}`);
+    }
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ALLOWED, '/adicionar palavra11');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Limite');
+  });
 });

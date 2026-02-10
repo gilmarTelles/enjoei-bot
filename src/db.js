@@ -77,8 +77,26 @@ function markProductSeen(product, keyword, chatId) {
   }
 }
 
+function countKeywords(chatId) {
+  const row = db.prepare('SELECT COUNT(*) AS cnt FROM keywords WHERE chat_id = ?').get(chatId);
+  return row.cnt;
+}
+
+function purgeOldProducts(days) {
+  const result = db.prepare(
+    "DELETE FROM seen_products WHERE first_seen_at < datetime('now', ? || ' days')"
+  ).run(-days);
+  return result.changes;
+}
+
+function backupDb() {
+  const backupPath = DB_PATH + '.bak';
+  db.backup(backupPath);
+  return backupPath;
+}
+
 function getDb() {
   return db;
 }
 
-module.exports = { init, addKeyword, removeKeyword, listKeywords, getAllUserKeywords, isProductSeen, markProductSeen, getDb };
+module.exports = { init, addKeyword, removeKeyword, listKeywords, getAllUserKeywords, isProductSeen, markProductSeen, countKeywords, purgeOldProducts, backupDb, getDb };

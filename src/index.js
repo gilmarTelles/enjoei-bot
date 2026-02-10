@@ -9,10 +9,34 @@ const { notifyNewProducts } = require('./notifier');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHECK_INTERVAL = parseInt(process.env.CHECK_INTERVAL, 10) || 5;
+const SCRAPE_DELAY_MS = 3000;
+const ADMIN_CHAT_ID = '7653440251';
+const PURGE_DAYS = 7;
 
 if (!TELEGRAM_BOT_TOKEN) {
   console.error('Erro: TELEGRAM_BOT_TOKEN obrigatorio no .env');
   process.exit(1);
+}
+
+async function notifyAdmin(text) {
+  try {
+    await telegram.sendMessage(ADMIN_CHAT_ID, `[Admin] ${text}`);
+  } catch (err) {
+    console.error('[admin] Falha ao notificar admin:', err.message);
+  }
+}
+
+async function runMaintenance() {
+  try {
+    const purged = db.purgeOldProducts(PURGE_DAYS);
+    console.log(`[maintenance] ${purged} produto(s) antigo(s) removido(s) (>${PURGE_DAYS} dias)`);
+
+    const backupPath = db.backupDb();
+    console.log(`[maintenance] Backup salvo em ${backupPath}`);
+  } catch (err) {
+    console.error('[maintenance] Erro:', err.message);
+    await notifyAdmin(`Erro na manutencao: ${err.message}`);
+  }
 }
 
 async function runCheck() {
@@ -32,11 +56,16 @@ async function runCheck() {
   console.log(`[check] Verificando ${Object.keys(keywordMap).length} palavra(s)-chave...`);
 
   const keywords = Object.keys(keywordMap);
-  for (const keyword of keywords) {
+  for (let i = 0; i < keywords.length; i++) {
+    const keyword = keywords[i];
     try {
       console.log(`[check] Buscando: "${keyword}"`);
       const products = await scraper.searchProducts(keyword);
       console.log(`[check] ${products.length} produto(s) para "${keyword}"`);
+
+      if (products.length === 0) {
+        console.warn(`[check] Nenhum resultado para "${keyword}" — possivel falha no scraper`);
+      }
 
       // For each user watching this keyword
       for (const chatId of keywordMap[keyword]) {
@@ -51,11 +80,13 @@ async function runCheck() {
         }
       }
 
-      if (keywords.indexOf(keyword) < keywords.length - 1) {
-        await new Promise(r => setTimeout(r, 3000));
+      // Rate limiting between scrapes
+      if (i < keywords.length - 1) {
+        await new Promise(r => setTimeout(r, SCRAPE_DELAY_MS));
       }
     } catch (err) {
       console.error(`[check] Erro em "${keyword}":`, err.message);
+      await notifyAdmin(`Erro ao buscar "${keyword}": ${err.message}`);
     }
   }
 
@@ -83,6 +114,13 @@ async function main() {
     runCheck().catch(err => console.error('[cron] Erro:', err.message));
   });
   console.log(`[bot] Verificacoes agendadas a cada ${CHECK_INTERVAL} minutos.`);
+
+  // Daily maintenance at 4 AM: purge old products + backup DB
+  cron.schedule('0 4 * * *', () => {
+    console.log('[cron] Manutencao diaria');
+    runMaintenance().catch(err => console.error('[cron] Erro manutencao:', err.message));
+  });
+  console.log('[bot] Manutencao diaria agendada (4h).');
 
   console.log('[bot] Bot rodando. Ctrl+C para parar.');
 }

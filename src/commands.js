@@ -2,6 +2,9 @@ const db = require('./db');
 const { sendMessage } = require('./telegram');
 
 const ALLOWED_USERS = ['6397962194', '7653440251'];
+const MAX_KEYWORDS = 10;
+const KEYWORD_MIN_LEN = 2;
+const KEYWORD_MAX_LEN = 50;
 
 function isAllowed(msg) {
   return ALLOWED_USERS.includes(msg.chat.id.toString());
@@ -36,6 +39,19 @@ function register(bot) {
         case '/adicionar': {
           if (!arg) {
             await sendMessage(chatId, 'Uso: /adicionar <palavra>\nExemplo: /adicionar nike air max');
+            return;
+          }
+          if (arg.length < KEYWORD_MIN_LEN) {
+            await sendMessage(chatId, `Palavra-chave muito curta (minimo ${KEYWORD_MIN_LEN} caracteres).`);
+            return;
+          }
+          if (arg.length > KEYWORD_MAX_LEN) {
+            await sendMessage(chatId, `Palavra-chave muito longa (maximo ${KEYWORD_MAX_LEN} caracteres).`);
+            return;
+          }
+          const count = db.countKeywords(chatId);
+          if (count >= MAX_KEYWORDS) {
+            await sendMessage(chatId, `Limite de ${MAX_KEYWORDS} palavras-chave atingido. Remova alguma com /remover.`);
             return;
           }
           const added = db.addKeyword(chatId, arg);

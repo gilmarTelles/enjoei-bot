@@ -126,3 +126,32 @@ describe('Seen Products', () => {
     expect(() => db.markProductSeen(product, 'camiseta', 'user1')).not.toThrow();
   });
 });
+
+describe('countKeywords', () => {
+  test('contar palavras-chave por usuario', () => {
+    db.addKeyword('user1', 'nike');
+    db.addKeyword('user1', 'adidas');
+    db.addKeyword('user2', 'puma');
+
+    expect(db.countKeywords('user1')).toBe(2);
+    expect(db.countKeywords('user2')).toBe(1);
+    expect(db.countKeywords('user3')).toBe(0);
+  });
+});
+
+describe('purgeOldProducts', () => {
+  test('remover produtos mais antigos que N dias', () => {
+    const instance = db.getDb();
+    // Insert a product with old date
+    instance.prepare(
+      "INSERT INTO seen_products (product_id, keyword, chat_id, title, price, url, first_seen_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now', '-10 days'))"
+    ).run('old-product', 'nike', 'user1', 'Old', 'R$ 10', 'url');
+    // Insert a recent product
+    db.markProductSeen({ id: 'new-product', title: 'New', price: 'R$ 20', url: 'url2' }, 'nike', 'user1');
+
+    const purged = db.purgeOldProducts(7);
+    expect(purged).toBe(1);
+    expect(db.isProductSeen('old-product', 'nike', 'user1')).toBe(false);
+    expect(db.isProductSeen('new-product', 'nike', 'user1')).toBe(true);
+  });
+});
