@@ -16,8 +16,18 @@ async function sendMessage(chatId, text) {
   }
 }
 
+async function sendPhoto(chatId, imageUrl, caption) {
+  try {
+    await bot.sendPhoto(chatId, imageUrl, { caption, parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error('[telegram] Erro ao enviar foto:', err.message);
+    // Fallback to text message if photo fails
+    await sendMessage(chatId, caption);
+  }
+}
+
 function getBot() {
   return bot;
 }
 
-module.exports = { init, sendMessage, getBot };
+module.exports = { init, sendMessage, sendPhoto, getBot };

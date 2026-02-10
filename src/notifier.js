@@ -1,4 +1,4 @@
-const { sendMessage } = require('./telegram');
+const { sendMessage, sendPhoto } = require('./telegram');
 
 function formatProduct(product, keyword) {
   const lines = [
@@ -14,8 +14,12 @@ function formatProduct(product, keyword) {
 
 async function notifyNewProducts(products, keyword, chatId) {
   for (const product of products) {
-    const message = formatProduct(product, keyword);
-    await sendMessage(chatId, message);
+    const caption = formatProduct(product, keyword);
+    if (product.image) {
+      await sendPhoto(chatId, product.image, caption);
+    } else {
+      await sendMessage(chatId, caption);
+    }
     await new Promise(r => setTimeout(r, 500));
   }
 }
