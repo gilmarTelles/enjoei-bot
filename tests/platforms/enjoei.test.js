@@ -45,9 +45,9 @@ describe('enjoei.buildSearchUrl', () => {
     expect(parsed.searchParams.get('st[sc]')).toBe('g');
   });
 
-  test('URL com filtro regiao usa sr=near_regions', () => {
+  test('URL com filtro regiao usa sr=same_country', () => {
     const url = enjoei.buildSearchUrl('nike', { sr: true });
-    expect(url).toContain('sr=near_regions');
+    expect(url).toContain('sr=same_country');
   });
 
   test('URL com filtro sort', () => {
@@ -70,7 +70,7 @@ describe('enjoei.buildSearchUrl', () => {
     expect(parsed.searchParams.get('u')).toBe('true');
     expect(parsed.searchParams.get('d')).toBe('masculino');
     expect(parsed.searchParams.get('st[sc]')).toBe('g');
-    expect(parsed.searchParams.get('sr')).toBe('near_regions');
+    expect(parsed.searchParams.get('sr')).toBe('same_country');
   });
 });
 

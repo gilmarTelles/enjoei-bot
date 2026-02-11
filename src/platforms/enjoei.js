@@ -18,7 +18,7 @@ function buildSearchUrl(keyword, filters) {
   if (filters) {
     if (filters.used) params.set('u', 'true');
     if (filters.dep) params.set('d', filters.dep);
-    if (filters.sr) params.set('sr', 'near_regions');
+    if (filters.sr) params.set('sr', 'same_country');
     if (filters.sz) params.set('st[sc]', filters.sz);
     if (filters.sort) params.set('sort', filters.sort);
   }
