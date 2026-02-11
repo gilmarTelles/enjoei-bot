@@ -521,18 +521,18 @@ describe('callback_query handler', () => {
     expect(filters.sz).toBe('m');
   });
 
-  test('f:sr:t toggle ativa todo o Brasil', async () => {
+  test('f:sr:country toggle ativa todo o Brasil', async () => {
     db.addKeyword(ALLOWED, 'nike');
     const keywords = db.listKeywordsWithId(ALLOWED);
     const kwId = keywords[0].id;
 
     const bot = createMockBot();
     commands.register(bot);
-    await bot.simulateCallback(ALLOWED, `f:${kwId}:sr:t`);
+    await bot.simulateCallback(ALLOWED, `f:${kwId}:sr:country`);
 
     const updated = db.getKeywordByIdAndChat(kwId, ALLOWED);
     const filters = JSON.parse(updated.filters);
-    expect(filters.sr).toBe(true);
+    expect(filters.sr).toBe('same_country');
   });
 
   test('f:sort:a toggle ativa menor preco', async () => {
@@ -567,7 +567,7 @@ describe('callback_query handler', () => {
     db.addKeyword(ALLOWED, 'nike');
     const keywords = db.listKeywordsWithId(ALLOWED);
     const kwId = keywords[0].id;
-    db.updateFilters(kwId, '{"used":true,"dep":"masculino","sz":"m","sr":true,"sort":"price_asc"}');
+    db.updateFilters(kwId, '{"used":true,"dep":"masculino","sz":"m","sr":"same_country","sort":"price_asc"}');
 
     const bot = createMockBot();
     commands.register(bot);
@@ -662,7 +662,7 @@ describe('formatFiltersSummary', () => {
   });
 
   test('formata filtro todo o Brasil (enjoei)', () => {
-    expect(formatFiltersSummary({ sr: true }, 'enjoei')).toBe(' [todo o Brasil]');
+    expect(formatFiltersSummary({ sr: 'same_country' }, 'enjoei')).toBe(' [todo o Brasil]');
   });
 
   test('formata filtro menor preco (enjoei)', () => {
@@ -674,7 +674,7 @@ describe('formatFiltersSummary', () => {
   });
 
   test('formata multiplos filtros (enjoei)', () => {
-    const result = formatFiltersSummary({ used: true, dep: 'masculino', sz: 'g', sr: true, sort: 'price_asc' }, 'enjoei');
+    const result = formatFiltersSummary({ used: true, dep: 'masculino', sz: 'g', sr: 'same_country', sort: 'price_asc' }, 'enjoei');
     expect(result).toContain('usado');
     expect(result).toContain('masculino');
     expect(result).toContain('tam: G');
@@ -701,7 +701,7 @@ describe('buildFilterKeyboard', () => {
     const keyboard = buildFilterKeyboard({
       id: 1,
       keyword: 'nike',
-      filters: '{"used":true,"dep":"masculino","sz":"m","sr":true,"sort":"price_asc"}',
+      filters: '{"used":true,"dep":"masculino","sz":"m","sr":"same_country","sort":"price_asc"}',
       platform: 'enjoei',
     });
     const rows = keyboard.inline_keyboard;
@@ -710,7 +710,8 @@ describe('buildFilterKeyboard', () => {
     expect(rows[2][1].text).toContain('\u2B1C'); // feminino off
     expect(rows[3][2].text).toContain('\u2705'); // M active
     expect(rows[3][0].text).toContain('\u2B1C'); // PP inactive
-    expect(rows[4][0].text).toContain('\u2705'); // same country
+    expect(rows[4][0].text).toContain('\u2B1C'); // Perto de mim inactive
+    expect(rows[4][1].text).toContain('\u2705'); // Todo o Brasil active
     expect(rows[5][0].text).toContain('\u2705'); // price_asc
     expect(rows[5][1].text).toContain('\u2B1C'); // price_desc off
   });

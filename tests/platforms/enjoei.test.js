@@ -17,15 +17,16 @@ describe('enjoei.buildSearchUrl', () => {
     expect(url).toContain('lp=24h');
   });
 
-  test('URL com lp=48h', () => {
-    const url = enjoei.buildSearchUrl('nike', { lp: '48h' });
-    expect(url).toContain('lp=48h');
+  test('URL com lp=14d', () => {
+    const url = enjoei.buildSearchUrl('nike', { lp: '14d' });
+    expect(url).toContain('lp=14d');
     expect(url).not.toContain('lp=24h');
   });
 
-  test('URL com lp=all nao inclui lp param', () => {
-    const url = enjoei.buildSearchUrl('nike', { lp: 'all' });
-    expect(url).not.toContain('lp=');
+  test('URL com lp=30d', () => {
+    const url = enjoei.buildSearchUrl('nike', { lp: '30d' });
+    expect(url).toContain('lp=30d');
+    expect(url).not.toContain('lp=24h');
   });
 
   test('URL com filtro usado', () => {
@@ -45,9 +46,14 @@ describe('enjoei.buildSearchUrl', () => {
     expect(parsed.searchParams.get('st[sc]')).toBe('g');
   });
 
-  test('URL com filtro regiao usa sr=same_country', () => {
-    const url = enjoei.buildSearchUrl('nike', { sr: true });
+  test('URL com filtro regiao same_country', () => {
+    const url = enjoei.buildSearchUrl('nike', { sr: 'same_country' });
     expect(url).toContain('sr=same_country');
+  });
+
+  test('URL com filtro regiao near_regions', () => {
+    const url = enjoei.buildSearchUrl('nike', { sr: 'near_regions' });
+    expect(url).toContain('sr=near_regions');
   });
 
   test('URL com filtro sort', () => {
@@ -61,7 +67,7 @@ describe('enjoei.buildSearchUrl', () => {
       used: true,
       dep: 'masculino',
       sz: 'g',
-      sr: true,
+      sr: 'same_country',
     });
     const parsed = new URL(url);
     expect(parsed.pathname).toBe('/selecao-brasileira/s');
@@ -90,13 +96,14 @@ describe('enjoei.buildFilterKeyboard', () => {
     const keyboard = enjoei.buildFilterKeyboard({
       id: 1,
       keyword: 'nike',
-      filters: '{"used":true,"dep":"masculino","sz":"m","sr":true,"sort":"price_asc"}',
+      filters: '{"used":true,"dep":"masculino","sz":"m","sr":"same_country","sort":"price_asc"}',
     });
     const rows = keyboard.inline_keyboard;
     expect(rows[1][0].text).toContain('\u2705'); // used active
     expect(rows[2][0].text).toContain('\u2705'); // masculino active
     expect(rows[3][2].text).toContain('\u2705'); // M active
-    expect(rows[4][0].text).toContain('\u2705'); // same country active
+    expect(rows[4][1].text).toContain('\u2705'); // Todo o Brasil active
+    expect(rows[4][0].text).toContain('\u2B1C'); // Perto de mim inactive
     expect(rows[5][0].text).toContain('\u2705'); // price_asc active
   });
 });
@@ -122,14 +129,34 @@ describe('enjoei.applyFilterToggle', () => {
     expect(result.dep).toBeUndefined();
   });
 
-  test('toggle lp to 48h', () => {
-    const result = enjoei.applyFilterToggle({}, 'lp', '48h');
-    expect(result.lp).toBe('48h');
+  test('toggle lp to 14d', () => {
+    const result = enjoei.applyFilterToggle({}, 'lp', '14d');
+    expect(result.lp).toBe('14d');
   });
 
   test('toggle lp off (same value)', () => {
-    const result = enjoei.applyFilterToggle({ lp: '48h' }, 'lp', '48h');
+    const result = enjoei.applyFilterToggle({ lp: '14d' }, 'lp', '14d');
     expect(result.lp).toBeUndefined();
+  });
+
+  test('toggle sr near_regions on', () => {
+    const result = enjoei.applyFilterToggle({}, 'sr', 'near');
+    expect(result.sr).toBe('near_regions');
+  });
+
+  test('toggle sr same_country on', () => {
+    const result = enjoei.applyFilterToggle({}, 'sr', 'country');
+    expect(result.sr).toBe('same_country');
+  });
+
+  test('toggle sr switches between values', () => {
+    const result = enjoei.applyFilterToggle({ sr: 'near_regions' }, 'sr', 'country');
+    expect(result.sr).toBe('same_country');
+  });
+
+  test('toggle sr off (same value)', () => {
+    const result = enjoei.applyFilterToggle({ sr: 'same_country' }, 'sr', 'country');
+    expect(result.sr).toBeUndefined();
   });
 });
 
@@ -155,15 +182,23 @@ describe('enjoei.formatFiltersSummary', () => {
   });
 
   test('formata filtro periodo nao padrao', () => {
-    expect(enjoei.formatFiltersSummary({ lp: '48h' })).toBe(' [periodo: 48h]');
+    expect(enjoei.formatFiltersSummary({ lp: '14d' })).toBe(' [periodo: 14 dias]');
   });
 
   test('nao mostra periodo 24h (padrao)', () => {
     expect(enjoei.formatFiltersSummary({ lp: '24h' })).toBe('');
   });
 
+  test('formata filtro perto de mim', () => {
+    expect(enjoei.formatFiltersSummary({ sr: 'near_regions' })).toBe(' [perto de mim]');
+  });
+
+  test('formata filtro todo o Brasil', () => {
+    expect(enjoei.formatFiltersSummary({ sr: 'same_country' })).toBe(' [todo o Brasil]');
+  });
+
   test('formata multiplos filtros', () => {
-    const result = enjoei.formatFiltersSummary({ used: true, dep: 'masculino', sz: 'g', sr: true, sort: 'price_asc' });
+    const result = enjoei.formatFiltersSummary({ used: true, dep: 'masculino', sz: 'g', sr: 'same_country', sort: 'price_asc' });
     expect(result).toContain('usado');
     expect(result).toContain('masculino');
     expect(result).toContain('tam: G');

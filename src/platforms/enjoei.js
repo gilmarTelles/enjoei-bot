@@ -8,17 +8,17 @@ function buildSearchUrl(keyword, filters) {
   const params = new URLSearchParams();
   params.set('q', slug);
 
-  // Default: last 24h. Only omit if user explicitly set lp to something else or 'all'
+  // Default: last 24h
   if (!filters || !filters.lp) {
     params.set('lp', '24h');
-  } else if (filters.lp !== 'all') {
+  } else {
     params.set('lp', filters.lp);
   }
 
   if (filters) {
     if (filters.used) params.set('u', 'true');
     if (filters.dep) params.set('d', filters.dep);
-    if (filters.sr) params.set('sr', 'same_country');
+    if (filters.sr) params.set('sr', filters.sr);
     if (filters.sz) params.set('st[sc]', filters.sz);
     if (filters.sort) params.set('sort', filters.sort);
   }
@@ -121,16 +121,17 @@ function buildFilterKeyboard(keywordRow) {
   const usedLabel = filters.used ? '\u2705 Somente usados' : '\u274C Somente usados';
   const depMLabel = filters.dep === 'masculino' ? '\u2705 Masculino' : '\u2B1C Masculino';
   const depFLabel = filters.dep === 'feminino' ? '\u2705 Feminino' : '\u2B1C Feminino';
-  const srLabel = filters.sr ? '\u2705 Todo o Brasil' : '\u274C Todo o Brasil';
+  const srNearLabel = filters.sr === 'near_regions' ? '\u2705 Perto de mim' : '\u2B1C Perto de mim';
+  const srCountryLabel = filters.sr === 'same_country' ? '\u2705 Todo o Brasil' : '\u2B1C Todo o Brasil';
   const sortALabel = filters.sort === 'price_asc' ? '\u2705 Menor preco' : '\u2B1C Menor preco';
   const sortDLabel = filters.sort === 'price_desc' ? '\u2705 Maior preco' : '\u2B1C Maior preco';
 
   // Last posted filter (lp). Default is 24h when not set.
   const lpValue = filters.lp || '24h';
   const lp24Label = lpValue === '24h' ? '\u2705 24h' : '\u2B1C 24h';
-  const lp48Label = lpValue === '48h' ? '\u2705 48h' : '\u2B1C 48h';
   const lp7dLabel = lpValue === '7d' ? '\u2705 7 dias' : '\u2B1C 7 dias';
-  const lpAllLabel = lpValue === 'all' ? '\u2705 Todos' : '\u2B1C Todos';
+  const lp14dLabel = lpValue === '14d' ? '\u2705 14 dias' : '\u2B1C 14 dias';
+  const lp30dLabel = lpValue === '30d' ? '\u2705 30 dias' : '\u2B1C 30 dias';
 
   const szLabels = { pp: 'PP', p: 'P', m: 'M', g: 'G', gg: 'GG' };
   const szRow = Object.entries(szLabels).map(([key, label]) => ({
@@ -142,9 +143,9 @@ function buildFilterKeyboard(keywordRow) {
     inline_keyboard: [
       [
         { text: lp24Label, callback_data: `f:${id}:lp:24h` },
-        { text: lp48Label, callback_data: `f:${id}:lp:48h` },
         { text: lp7dLabel, callback_data: `f:${id}:lp:7d` },
-        { text: lpAllLabel, callback_data: `f:${id}:lp:all` },
+        { text: lp14dLabel, callback_data: `f:${id}:lp:14d` },
+        { text: lp30dLabel, callback_data: `f:${id}:lp:30d` },
       ],
       [{ text: usedLabel, callback_data: `f:${id}:used:t` }],
       [
@@ -152,7 +153,10 @@ function buildFilterKeyboard(keywordRow) {
         { text: depFLabel, callback_data: `f:${id}:dep:f` },
       ],
       szRow,
-      [{ text: srLabel, callback_data: `f:${id}:sr:t` }],
+      [
+        { text: srNearLabel, callback_data: `f:${id}:sr:near` },
+        { text: srCountryLabel, callback_data: `f:${id}:sr:country` },
+      ],
       [
         { text: sortALabel, callback_data: `f:${id}:sort:a` },
         { text: sortDLabel, callback_data: `f:${id}:sort:d` },
@@ -189,10 +193,13 @@ function applyFilterToggle(filters, filterType, filterValue) {
       updated.sz = updated.sz === filterValue ? undefined : filterValue;
       if (!updated.sz) delete updated.sz;
       break;
-    case 'sr':
-      updated.sr = !updated.sr;
+    case 'sr': {
+      const srMap = { near: 'near_regions', country: 'same_country' };
+      const newSr = srMap[filterValue];
+      updated.sr = updated.sr === newSr ? undefined : newSr;
       if (!updated.sr) delete updated.sr;
       break;
+    }
     case 'sort': {
       const sortMap = { a: 'price_asc', d: 'price_desc' };
       const newSort = sortMap[filterValue];
@@ -209,13 +216,14 @@ function formatFiltersSummary(filters) {
   if (!filters || Object.keys(filters).length === 0) return '';
   const parts = [];
   if (filters.lp && filters.lp !== '24h') {
-    const lpLabels = { '48h': '48h', '7d': '7 dias', all: 'todos' };
+    const lpLabels = { '7d': '7 dias', '14d': '14 dias', '30d': '30 dias' };
     parts.push(`periodo: ${lpLabels[filters.lp] || filters.lp}`);
   }
   if (filters.used) parts.push('usado');
   if (filters.dep) parts.push(filters.dep);
   if (filters.sz) parts.push(`tam: ${filters.sz.toUpperCase()}`);
-  if (filters.sr) parts.push('todo o Brasil');
+  if (filters.sr === 'near_regions') parts.push('perto de mim');
+  if (filters.sr === 'same_country') parts.push('todo o Brasil');
   if (filters.sort === 'price_asc') parts.push('menor preco');
   if (filters.sort === 'price_desc') parts.push('maior preco');
   return parts.length > 0 ? ` [${parts.join(', ')}]` : '';

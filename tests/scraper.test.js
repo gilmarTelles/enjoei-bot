@@ -38,9 +38,11 @@ describe('buildSearchUrl (backward compat - delegates to enjoei)', () => {
     expect(url).toContain('d=feminino');
   });
 
-  test('URL com filtro regiao usa sr=same_country', () => {
-    const url = buildSearchUrl('nike', { sr: true });
-    expect(url).toContain('sr=same_country');
+  test('URL com filtro regiao usa valor do filtro', () => {
+    const url1 = buildSearchUrl('nike', { sr: 'same_country' });
+    expect(url1).toContain('sr=same_country');
+    const url2 = buildSearchUrl('nike', { sr: 'near_regions' });
+    expect(url2).toContain('sr=near_regions');
   });
 
   test('URL com filtro tamanho usa param st[sc]', () => {
@@ -63,7 +65,7 @@ describe('buildSearchUrl (backward compat - delegates to enjoei)', () => {
     const url = buildSearchUrl('ceni', {
       used: true,
       dep: 'masculino',
-      sr: true,
+      sr: 'same_country',
       sz: 'g',
       sort: 'price_asc',
     });
