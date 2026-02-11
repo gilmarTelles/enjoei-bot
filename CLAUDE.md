@@ -22,23 +22,34 @@ node src/index.js
 npm test
 ```
 
-### Deployment (PM2)
+### Production Server
 ```bash
-# Start with PM2
-pm2 start ecosystem.config.js
+# SSH into the server
+ssh $SSH_SERVER
 
-# Or use the configured name
-pm2 start src/index.js --name enjoei-bot
+# Project directory on the server
+cd ~/enjoei-bot
+
+# Deploy latest changes (from server)
+git pull && pm2 restart enjoei-bot
+
+# Or deploy from local machine in one command
+ssh $SSH_SERVER "cd enjoei-bot && git pull && pm2 restart enjoei-bot"
 
 # View logs
-pm2 logs enjoei-bot
+ssh $SSH_SERVER "pm2 logs enjoei-bot"
 
-# Restart/stop/delete
+# Check status
+ssh $SSH_SERVER "pm2 status"
+```
+
+### PM2 Commands (on server)
+```bash
+pm2 start ecosystem.config.js
+pm2 start src/index.js --name enjoei-bot
 pm2 restart enjoei-bot
 pm2 stop enjoei-bot
-pm2 delete enjoei-bot
-
-# Save PM2 process list
+pm2 logs enjoei-bot
 pm2 save
 ```
 
