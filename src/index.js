@@ -24,15 +24,17 @@ if (!TELEGRAM_BOT_TOKEN) {
 
 let consecutiveEmptyChecks = 0;
 
-const EASTER_EGG = `................./¯/)
-.............../¯ ./
-............./. . /
-......../´¯/' . '/´¯\`•¸,
-..../' /. ./ . ./ . ./¯\\
-..( . ( . ( . ( ¯ ./' . ')
-...\\. . . . . . . . . . ./
-
-*VAI TOMA NO CU RAFAEL BERNARDELLI*`;
+const EASTER_EGG = `\`\`\`
+         ╭──╮
+         │  │
+         │  │
+         │  │
+    ╭────┤  ├────╮
+    │    │  │    │
+    │    │  │    │
+    ╰────┴──┴────╯
+\`\`\`
+*VAI TOMA NO CU RAFAEL BERNARDELLI* 🖕`;
 
 async function notifyAdmin(text) {
   if (!ADMIN_CHAT_ID) return;
