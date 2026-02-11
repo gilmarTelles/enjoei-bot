@@ -277,9 +277,6 @@ function register(bot) {
                 }
               }
               let summaryMsg = `Busca concluida: ${summary.totalNew} novo(s)`;
-              if (summary.totalPriceDrops > 0) {
-                summaryMsg += `, ${summary.totalPriceDrops} queda(s) de preco`;
-              }
               if (platformParts.length > 0) {
                 summaryMsg += ` (${platformParts.join(', ')})`;
               }
@@ -303,28 +300,6 @@ function register(bot) {
           break;
         }
 
-        case '/monitorados': {
-          const watched = db.listWatchedProducts(chatId);
-          if (watched.length === 0) {
-            await sendMessage(chatId, 'Nenhum produto sendo monitorado.\nUse o botao "Monitorar preco" nas notificacoes de novos produtos.');
-          } else {
-            const lines = ['*Produtos monitorados:*', ''];
-            const buttons = [];
-            for (const w of watched) {
-              const platformModule = getPlatform(w.platform || DEFAULT_PLATFORM);
-              const platformLabel = platformModule ? platformModule.platformName : w.platform;
-              lines.push(`- ${w.title || 'Sem titulo'} (${platformLabel})`);
-              lines.push(`  Preco: ${w.last_price || 'N/A'}`);
-              lines.push(`  ${w.url}`);
-              lines.push('');
-              buttons.push([{ text: `\u274C Remover: ${(w.title || 'Produto').substring(0, 30)}`, callback_data: `uw:${w.id}` }]);
-            }
-            const extra = buttons.length > 0 ? { reply_markup: { inline_keyboard: buttons } } : {};
-            await sendMessage(chatId, lines.join('\n'), extra);
-          }
-          break;
-        }
-
         case '/status': {
           const paused = db.isPaused(chatId);
           if (!statusData) {
@@ -341,7 +316,6 @@ function register(bot) {
               `Ultima verificacao: ${statusData.lastCheckTime}`,
               `Palavras-chave verificadas: ${statusData.keywordsChecked}`,
               `Novos produtos encontrados: ${statusData.newProductsFound}`,
-              `Quedas de preco detectadas: ${statusData.priceDrops}`,
               '',
               `Notificacoes: ${paused ? 'pausadas' : 'ativas'}`,
             ];
@@ -365,7 +339,6 @@ function register(bot) {
             '/listar — Ver suas palavras-chave',
             '/filtros — Configurar filtros de busca',
             '/buscar — Buscar agora',
-            '/monitorados — Ver produtos monitorados',
             '/parar — Pausar notificacoes',
             '/retomar — Retomar notificacoes',
             '/status — Status da ultima verificacao',
@@ -415,39 +388,6 @@ function register(bot) {
           reply_markup: keyboard,
         });
         await bot.answerCallbackQuery(query.id);
-        return;
-      }
-
-      // Watch product: wp:<seenId>
-      if (data.startsWith('wp:')) {
-        const seenId = parseInt(data.split(':')[1], 10);
-        const row = db.getSeenProductById(seenId);
-        if (!row) {
-          await bot.answerCallbackQuery(query.id, { text: 'Produto nao encontrado.' });
-          return;
-        }
-        if (row.chat_id !== chatId) {
-          await bot.answerCallbackQuery(query.id, { text: 'Acesso negado.' });
-          return;
-        }
-        if (db.isProductWatched(chatId, row.product_id, row.platform)) {
-          await bot.answerCallbackQuery(query.id, { text: 'Produto ja esta sendo monitorado.' });
-          return;
-        }
-        db.addWatchedProduct(chatId, row.product_id, row.platform, row.title, row.url, row.price);
-        await bot.answerCallbackQuery(query.id, { text: 'Preco sendo monitorado! Voce sera notificado sobre quedas.' });
-        return;
-      }
-
-      // Unwatch product: uw:<watchedId>
-      if (data.startsWith('uw:')) {
-        const watchedId = parseInt(data.split(':')[1], 10);
-        const removed = db.removeWatchedProduct(watchedId, chatId);
-        if (removed) {
-          await bot.answerCallbackQuery(query.id, { text: 'Monitoramento removido.' });
-        } else {
-          await bot.answerCallbackQuery(query.id, { text: 'Produto nao encontrado ou ja removido.' });
-        }
         return;
       }
 

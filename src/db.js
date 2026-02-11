@@ -120,21 +120,6 @@ function init() {
     console.error('[db] Migration error (keywords unique constraint):', err.message);
   }
 
-  // Migration: watched_products table for individual price monitoring
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS watched_products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      chat_id TEXT NOT NULL,
-      product_id TEXT NOT NULL,
-      platform TEXT NOT NULL,
-      title TEXT,
-      url TEXT,
-      last_price TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(chat_id, product_id, platform)
-    );
-  `);
-
   return db;
 }
 
@@ -194,15 +179,6 @@ function markProductSeen(product, keyword, chatId, platform = 'enjoei') {
   }
 }
 
-function getSeenProductPrice(productId, keyword, chatId, platform = 'enjoei') {
-  const row = db.prepare('SELECT price FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').get(productId, keyword, chatId, platform);
-  return row ? row.price : null;
-}
-
-function updateSeenProductPrice(productId, keyword, chatId, newPrice, platform = 'enjoei') {
-  db.prepare('UPDATE seen_products SET price = ? WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').run(newPrice, productId, keyword, chatId, platform);
-}
-
 function countKeywords(chatId) {
   const row = db.prepare('SELECT COUNT(*) AS cnt FROM keywords WHERE chat_id = ?').get(chatId);
   return row.cnt;
@@ -239,51 +215,11 @@ function getSeenProductRowId(productId, keyword, chatId, platform = 'enjoei') {
   return row ? row.id : null;
 }
 
-function getSeenProductById(id) {
-  return db.prepare('SELECT * FROM seen_products WHERE id = ?').get(id) || null;
-}
-
-function addWatchedProduct(chatId, productId, platform, title, url, lastPrice) {
-  try {
-    db.prepare(
-      'INSERT OR IGNORE INTO watched_products (chat_id, product_id, platform, title, url, last_price) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(chatId, productId, platform, title, url, lastPrice);
-    return true;
-  } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return false;
-    throw err;
-  }
-}
-
-function removeWatchedProduct(id, chatId) {
-  const result = db.prepare('DELETE FROM watched_products WHERE id = ? AND chat_id = ?').run(id, chatId);
-  return result.changes > 0;
-}
-
-function isProductWatched(chatId, productId, platform) {
-  const row = db.prepare('SELECT 1 FROM watched_products WHERE chat_id = ? AND product_id = ? AND platform = ?').get(chatId, productId, platform);
-  return !!row;
-}
-
-function listWatchedProducts(chatId) {
-  return db.prepare('SELECT * FROM watched_products WHERE chat_id = ? ORDER BY created_at').all(chatId);
-}
-
-function getAllWatchedProducts() {
-  return db.prepare('SELECT * FROM watched_products').all();
-}
-
-function updateWatchedProductPrice(id, newPrice) {
-  db.prepare('UPDATE watched_products SET last_price = ? WHERE id = ?').run(newPrice, id);
-}
-
 module.exports = {
   init, addKeyword, removeKeyword, listKeywords, listKeywordsWithId,
   getKeywordByIdAndChat, updateFilters, getAllUserKeywords,
-  isProductSeen, markProductSeen, getSeenProductPrice, updateSeenProductPrice,
+  isProductSeen, markProductSeen,
   countKeywords, purgeOldProducts, backupDb, getDb,
   setPaused, isPaused,
-  getSeenProductRowId, getSeenProductById,
-  addWatchedProduct, removeWatchedProduct, isProductWatched,
-  listWatchedProducts, getAllWatchedProducts, updateWatchedProductPrice,
+  getSeenProductRowId,
 };

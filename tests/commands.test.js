@@ -259,7 +259,6 @@ describe('Commands', () => {
       lastCheckTime: '10/02/2026 14:30',
       keywordsChecked: 3,
       newProductsFound: 2,
-      priceDrops: 1,
     });
     const bot = createMockBot();
     commands.register(bot);
@@ -316,7 +315,6 @@ describe('Commands', () => {
     commands.register(bot);
     commands.setCheckCallback(async () => ({
       totalNew: 3,
-      totalPriceDrops: 1,
       byPlatform: { enjoei: 1, ml: 2 },
     }));
     telegram.sendMessage.mockClear();
@@ -326,7 +324,6 @@ describe('Commands', () => {
     const summaryMsg = telegram.sendMessage.mock.calls[1][1];
     expect(summaryMsg).toContain('Busca concluida');
     expect(summaryMsg).toContain('3 novo(s)');
-    expect(summaryMsg).toContain('1 queda(s) de preco');
     expect(summaryMsg).toContain('Enjoei: 1');
     expect(summaryMsg).toContain('Mercado Livre: 2');
   });
@@ -336,7 +333,6 @@ describe('Commands', () => {
     commands.register(bot);
     commands.setCheckCallback(async () => ({
       totalNew: 0,
-      totalPriceDrops: 0,
       byPlatform: {},
     }));
     telegram.sendMessage.mockClear();

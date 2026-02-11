@@ -2,8 +2,11 @@ const platformKey = 'enjoei';
 const platformName = 'Enjoei';
 
 function buildSearchUrl(keyword, filters) {
+  // Build slug for the URL path (spaces → hyphens, lowercase)
+  const slug = keyword.trim().toLowerCase().replace(/\s+/g, '-');
+
   const params = new URLSearchParams();
-  params.set('q', keyword);
+  params.set('q', slug);
 
   // Default: last 24h. Only omit if user explicitly set lp to something else or 'all'
   if (!filters || !filters.lp) {
@@ -14,13 +17,13 @@ function buildSearchUrl(keyword, filters) {
 
   if (filters) {
     if (filters.used) params.set('u', 'true');
-    if (filters.dep) params.set('dep', filters.dep);
-    if (filters.sr) params.set('sr', 'same_country');
-    if (filters.sz) params.set('size', filters.sz);
+    if (filters.dep) params.set('d', filters.dep);
+    if (filters.sr) params.set('sr', 'near_regions');
+    if (filters.sz) params.set('st[sc]', filters.sz);
     if (filters.sort) params.set('sort', filters.sort);
   }
 
-  return `https://www.enjoei.com.br/s?${params.toString()}`;
+  return `https://www.enjoei.com.br/${slug}/s?${params.toString()}`;
 }
 
 async function scrapePage(browser, keyword, filters) {
@@ -97,57 +100,6 @@ async function scrapePage(browser, keyword, filters) {
     });
 
     return products;
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-async function scrapeProductPrice(browser, url) {
-  const page = await browser.newPage();
-  try {
-    await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-    );
-    await page.setViewport({ width: 1280, height: 900 });
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-    await new Promise(r => setTimeout(r, 2000));
-
-    const price = await page.evaluate(() => {
-      // Platform-specific selectors
-      const selectors = ['[data-test="div-preco"]', '.ProductPage__price'];
-      for (const sel of selectors) {
-        const el = document.querySelector(sel);
-        if (el) {
-          const match = el.textContent.match(/R\$\s*[\d.,]+/);
-          if (match) return match[0];
-        }
-      }
-      // Fallback: meta tag
-      const meta = document.querySelector('meta[property="product:price:amount"]');
-      if (meta) {
-        const amount = meta.getAttribute('content');
-        if (amount) return `R$ ${amount}`;
-      }
-      // Fallback: JSON-LD
-      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
-      for (const script of scripts) {
-        try {
-          const data = JSON.parse(script.textContent);
-          if (data['@type'] === 'Product' && data.offers) {
-            const p = data.offers.price || (data.offers[0] && data.offers[0].price);
-            if (p) return `R$ ${p}`;
-          }
-        } catch {}
-      }
-      // Fallback: regex on body
-      const bodyMatch = document.body.innerText.match(/R\$\s*[\d.,]+/);
-      return bodyMatch ? bodyMatch[0] : null;
-    });
-
-    return price;
-  } catch (err) {
-    console.error(`[enjoei] scrapeProductPrice failed for ${url}: ${err.message}`);
-    return null;
   } finally {
     await page.close().catch(() => {});
   }
@@ -274,7 +226,6 @@ module.exports = {
   platformName,
   buildSearchUrl,
   scrapePage,
-  scrapeProductPrice,
   buildFilterKeyboard,
   applyFilterToggle,
   formatFiltersSummary,

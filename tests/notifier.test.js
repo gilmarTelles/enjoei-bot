@@ -3,7 +3,7 @@ jest.mock('../src/telegram', () => ({
   sendPhoto: jest.fn(async () => {}),
 }));
 
-const { formatProduct, formatPriceDrop } = require('../src/notifier');
+const { formatProduct } = require('../src/notifier');
 
 describe('formatProduct', () => {
   test('formatar produto com todos os campos (default enjoei)', () => {
@@ -56,38 +56,3 @@ describe('formatProduct', () => {
   });
 });
 
-describe('formatPriceDrop', () => {
-  test('formatar queda de preco (default enjoei)', () => {
-    const product = {
-      title: 'Camiseta Nike',
-      url: 'https://www.enjoei.com.br/p/camiseta-nike-123',
-    };
-    const result = formatPriceDrop(product, 'nike', 'R$ 150,00', 'R$ 100,00');
-
-    expect(result).toContain('Queda de preco no Enjoei');
-    expect(result).toContain('R$ 150,00');
-    expect(result).toContain('R$ 100,00');
-    expect(result).toContain('"nike"');
-    expect(result).toContain('https://www.enjoei.com.br/p/camiseta-nike-123');
-  });
-
-  test('formatar queda de preco com platform ml', () => {
-    const product = {
-      title: 'Camiseta Nike',
-      url: 'https://www.mercadolivre.com.br/camiseta-nike',
-    };
-    const result = formatPriceDrop(product, 'nike', 'R$ 150,00', 'R$ 100,00', 'ml');
-
-    expect(result).toContain('Queda de preco no Mercado Livre');
-  });
-
-  test('formatar queda de preco com platform olx', () => {
-    const product = {
-      title: 'Camiseta Nike',
-      url: 'https://www.olx.com.br/d/camiseta-nike',
-    };
-    const result = formatPriceDrop(product, 'nike', 'R$ 150,00', 'R$ 100,00', 'olx');
-
-    expect(result).toContain('Queda de preco no OLX');
-  });
-});

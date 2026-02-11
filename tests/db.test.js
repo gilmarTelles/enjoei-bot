@@ -262,21 +262,6 @@ describe('Seen Products', () => {
     expect(() => db.markProductSeen(product, 'camiseta', 'user1')).not.toThrow();
   });
 
-  test('getSeenProductPrice retorna preco salvo', () => {
-    db.markProductSeen(product, 'camiseta', 'user1');
-    expect(db.getSeenProductPrice('produto-123', 'camiseta', 'user1')).toBe('R$ 50');
-  });
-
-  test('getSeenProductPrice retorna null para produto nao visto', () => {
-    expect(db.getSeenProductPrice('nao-existe', 'camiseta', 'user1')).toBeNull();
-  });
-
-  test('updateSeenProductPrice atualiza preco', () => {
-    db.markProductSeen(product, 'camiseta', 'user1');
-    db.updateSeenProductPrice('produto-123', 'camiseta', 'user1', 'R$ 30');
-    expect(db.getSeenProductPrice('produto-123', 'camiseta', 'user1')).toBe('R$ 30');
-  });
-
   test('isProductSeen with platform parameter', () => {
     db.markProductSeen(product, 'camiseta', 'user1', 'ml');
     expect(db.isProductSeen('produto-123', 'camiseta', 'user1', 'ml')).toBe(true);

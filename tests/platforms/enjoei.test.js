@@ -1,9 +1,15 @@
 const enjoei = require('../../src/platforms/enjoei');
 
 describe('enjoei.buildSearchUrl', () => {
-  test('URL basica sem filtros - inclui lp=24h por padrao', () => {
+  test('URL basica sem filtros - slug no path e lp=24h por padrao', () => {
     const url = enjoei.buildSearchUrl('nike', null);
-    expect(url).toBe('https://www.enjoei.com.br/s?q=nike&lp=24h');
+    expect(url).toBe('https://www.enjoei.com.br/nike/s?q=nike&lp=24h');
+  });
+
+  test('URL com keyword multi-palavra usa slug com hifens', () => {
+    const url = enjoei.buildSearchUrl('selecao brasileira', null);
+    expect(url).toContain('/selecao-brasileira/s?');
+    expect(url).toContain('q=selecao-brasileira');
   });
 
   test('URL com filtros vazio - inclui lp=24h por padrao', () => {
@@ -27,19 +33,44 @@ describe('enjoei.buildSearchUrl', () => {
     expect(url).toContain('u=true');
   });
 
-  test('URL com filtro departamento', () => {
+  test('URL com filtro departamento usa param d', () => {
     const url = enjoei.buildSearchUrl('nike', { dep: 'masculino' });
-    expect(url).toContain('dep=masculino');
+    expect(url).toContain('d=masculino');
+    expect(url).not.toContain('dep=');
   });
 
-  test('URL com filtro tamanho', () => {
-    const url = enjoei.buildSearchUrl('nike', { sz: 'm' });
-    expect(url).toContain('size=m');
+  test('URL com filtro tamanho usa param st[sc]', () => {
+    const url = enjoei.buildSearchUrl('nike', { sz: 'g' });
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get('st[sc]')).toBe('g');
+  });
+
+  test('URL com filtro regiao usa sr=near_regions', () => {
+    const url = enjoei.buildSearchUrl('nike', { sr: true });
+    expect(url).toContain('sr=near_regions');
   });
 
   test('URL com filtro sort', () => {
     const url = enjoei.buildSearchUrl('nike', { sort: 'price_asc' });
     expect(url).toContain('sort=price_asc');
+  });
+
+  test('URL com todos os filtros corresponde ao formato real do Enjoei', () => {
+    const url = enjoei.buildSearchUrl('selecao brasileira', {
+      lp: '24h',
+      used: true,
+      dep: 'masculino',
+      sz: 'g',
+      sr: true,
+    });
+    const parsed = new URL(url);
+    expect(parsed.pathname).toBe('/selecao-brasileira/s');
+    expect(parsed.searchParams.get('q')).toBe('selecao-brasileira');
+    expect(parsed.searchParams.get('lp')).toBe('24h');
+    expect(parsed.searchParams.get('u')).toBe('true');
+    expect(parsed.searchParams.get('d')).toBe('masculino');
+    expect(parsed.searchParams.get('st[sc]')).toBe('g');
+    expect(parsed.searchParams.get('sr')).toBe('near_regions');
   });
 });
 
