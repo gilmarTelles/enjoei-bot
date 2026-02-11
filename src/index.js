@@ -24,6 +24,16 @@ if (!TELEGRAM_BOT_TOKEN) {
 
 let consecutiveEmptyChecks = 0;
 
+const EASTER_EGG = `................./¯/)
+.............../¯ ./
+............./. . /
+......../´¯/' . '/´¯\`•¸,
+..../' /. ./ . ./ . ./¯\\
+..( . ( . ( . ( ¯ ./' . ')
+...\\. . . . . . . . . . ./
+
+*VAI TOMA NO CU RAFAEL BERNARDELLI*`;
+
 async function notifyAdmin(text) {
   if (!ADMIN_CHAT_ID) return;
   try {
@@ -175,6 +185,19 @@ async function runCheck() {
   });
 
   console.log(`[check] Concluido. ${totalNewProducts} novo(s).`);
+
+  // Easter egg: ~1% chance per check cycle
+  if (Math.random() < 0.01) {
+    const activeChatIds = chatIds.filter(cid => !pausedSet.has(cid));
+    for (const cid of activeChatIds) {
+      try {
+        await telegram.sendMessage(cid, EASTER_EGG);
+      } catch (err) {
+        console.error(`[easter] Erro ao enviar para ${cid}:`, err.message);
+      }
+    }
+    console.log('[easter] 🖕 Enviado!');
+  }
 
   return { totalNew: totalNewProducts, byPlatform };
 }
