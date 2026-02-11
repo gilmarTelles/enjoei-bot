@@ -157,7 +157,7 @@ function register(bot) {
       switch (command) {
         case '/adicionar': {
           if (!arg) {
-            await sendMessage(chatId, 'Uso: /adicionar <palavra> [< preco\\_max] [plataforma]\nExemplo: /adicionar nike air max\nExemplo: /adicionar nike < 200\nExemplo: /adicionar nike ml\nExemplo: /adicionar nike < 200 olx\n\nPlataformas: enjoei (padrao), ml, olx');
+            await sendMessage(chatId, 'Uso: /adicionar <palavra> [< preco\\_max]\nExemplo: /adicionar nike air max\nExemplo: /adicionar nike < 200');
             return;
           }
 
@@ -202,7 +202,7 @@ function register(bot) {
 
         case '/remover': {
           if (!arg) {
-            await sendMessage(chatId, 'Uso: /remover <palavra> [plataforma]\nExemplo: /remover nike air max\nExemplo: /remover nike ml');
+            await sendMessage(chatId, 'Uso: /remover <palavra>\nExemplo: /remover nike air max');
             return;
           }
           const { keyword: kw, platform: rmPlatform } = parsePlatformFromArg(arg);
@@ -330,12 +330,9 @@ function register(bot) {
           await sendMessage(chatId, [
             '*Bot de Buscas - Comandos*',
             '',
-            '/adicionar <palavra> — Adicionar palavra-chave (Enjoei)',
-            '/adicionar <palavra> ml — Adicionar no Mercado Livre',
-            '/adicionar <palavra> olx — Adicionar na OLX',
+            '/adicionar <palavra> — Adicionar palavra-chave',
             '/adicionar <palavra> < preco — Com filtro de preco',
-            '/adicionar <palavra> < preco ml — Com preco no ML',
-            '/remover <palavra> [plataforma] — Remover palavra-chave',
+            '/remover <palavra> — Remover palavra-chave',
             '/listar — Ver suas palavras-chave',
             '/filtros — Configurar filtros de busca',
             '/buscar — Buscar agora',
@@ -343,8 +340,6 @@ function register(bot) {
             '/retomar — Retomar notificacoes',
             '/status — Status da ultima verificacao',
             '/ajuda — Mostrar esta mensagem',
-            '',
-            'Plataformas: enjoei (padrao), ml (Mercado Livre), olx (OLX)',
           ].join('\n'));
           break;
         }

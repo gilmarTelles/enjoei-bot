@@ -72,7 +72,7 @@ describe('Commands', () => {
     expect(telegram.sendMessage).toHaveBeenCalledWith(BLOCKED, 'Acesso negado.');
   });
 
-  test('/ajuda mostra comandos e plataformas', async () => {
+  test('/ajuda mostra comandos', async () => {
     const bot = createMockBot();
     commands.register(bot);
     await bot.simulate(ALLOWED, '/ajuda');
@@ -83,10 +83,6 @@ describe('Commands', () => {
     expect(msg).toContain('/buscar');
     expect(msg).toContain('/status');
     expect(msg).toContain('/filtros');
-    expect(msg).toContain('ml');
-    expect(msg).toContain('olx');
-    expect(msg).toContain('Mercado Livre');
-    expect(msg).toContain('OLX');
   });
 
   test('/start mostra comandos', async () => {
@@ -102,8 +98,6 @@ describe('Commands', () => {
     await bot.simulate(ALLOWED, '/adicionar');
     const msg = telegram.sendMessage.mock.calls[0][1];
     expect(msg).toContain('Uso:');
-    expect(msg).toContain('ml');
-    expect(msg).toContain('olx');
   });
 
   test('/adicionar com palavra confirma e menciona plataforma Enjoei', async () => {
@@ -115,37 +109,6 @@ describe('Commands', () => {
     expect(msg).toContain('ceni');
     expect(msg).toContain('Enjoei');
     expect(msg).toContain('/filtros');
-  });
-
-  test('/adicionar nike ml confirma Mercado Livre', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulate(ALLOWED, '/adicionar nike ml');
-    const msg = telegram.sendMessage.mock.calls[0][1];
-    expect(msg).toContain('adicionada');
-    expect(msg).toContain('nike');
-    expect(msg).toContain('Mercado Livre');
-  });
-
-  test('/adicionar nike olx confirma OLX', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulate(ALLOWED, '/adicionar nike olx');
-    const msg = telegram.sendMessage.mock.calls[0][1];
-    expect(msg).toContain('adicionada');
-    expect(msg).toContain('nike');
-    expect(msg).toContain('OLX');
-  });
-
-  test('/adicionar nike < 200 ml com preco no ML', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulate(ALLOWED, '/adicionar nike < 200 ml');
-    const msg = telegram.sendMessage.mock.calls[0][1];
-    expect(msg).toContain('nike');
-    expect(msg).toContain('Mercado Livre');
-    expect(msg).toContain('max R$');
-    expect(msg).toContain('200');
   });
 
   test('/adicionar duplicada avisa', async () => {
@@ -211,14 +174,13 @@ describe('Commands', () => {
     const bot = createMockBot();
     commands.register(bot);
     await bot.simulate(ALLOWED, '/adicionar nike');
-    await bot.simulate(ALLOWED, '/adicionar adidas ml');
+    await bot.simulate(ALLOWED, '/adicionar adidas');
     telegram.sendMessage.mockClear();
     await bot.simulate(ALLOWED, '/listar');
     const msg = telegram.sendMessage.mock.calls[0][1];
     expect(msg).toContain('nike');
     expect(msg).toContain('Enjoei');
     expect(msg).toContain('adidas');
-    expect(msg).toContain('Mercado Livre');
   });
 
   test('/listar mostra filtro de preco', async () => {
@@ -315,7 +277,7 @@ describe('Commands', () => {
     commands.register(bot);
     commands.setCheckCallback(async () => ({
       totalNew: 3,
-      byPlatform: { enjoei: 1, ml: 2 },
+      byPlatform: { enjoei: 3 },
     }));
     telegram.sendMessage.mockClear();
     await bot.simulate(ALLOWED, '/buscar');
@@ -324,8 +286,7 @@ describe('Commands', () => {
     const summaryMsg = telegram.sendMessage.mock.calls[1][1];
     expect(summaryMsg).toContain('Busca concluida');
     expect(summaryMsg).toContain('3 novo(s)');
-    expect(summaryMsg).toContain('Enjoei: 1');
-    expect(summaryMsg).toContain('Mercado Livre: 2');
+    expect(summaryMsg).toContain('Enjoei: 3');
   });
 
   test('/buscar sem resultados mostra 0', async () => {
@@ -414,9 +375,9 @@ describe('/filtros command', () => {
     expect(call[2].reply_markup).toHaveProperty('inline_keyboard');
   });
 
-  test('/filtros com varias keywords mostra seletor com plataforma', async () => {
+  test('/filtros com varias keywords mostra seletor', async () => {
     db.addKeyword(ALLOWED, 'nike');
-    db.addKeyword(ALLOWED, 'adidas', null, 'ml');
+    db.addKeyword(ALLOWED, 'adidas');
     const bot = createMockBot();
     commands.register(bot);
     await bot.simulate(ALLOWED, '/filtros');
@@ -425,10 +386,8 @@ describe('/filtros command', () => {
     expect(call[1]).toContain('Escolha');
     const buttons = call[2].reply_markup.inline_keyboard;
     expect(buttons).toHaveLength(2);
-    // Check platform label in buttons
     const buttonTexts = buttons.map(row => row[0].text);
     expect(buttonTexts.some(t => t.includes('Enjoei'))).toBe(true);
-    expect(buttonTexts.some(t => t.includes('Mercado Livre'))).toBe(true);
   });
 
   test('/filtros nike vai direto pro teclado da keyword', async () => {
@@ -462,7 +421,7 @@ describe('callback_query handler', () => {
   });
 
   test('fs: seleciona keyword e mostra filtros com plataforma', async () => {
-    db.addKeyword(ALLOWED, 'nike', null, 'ml');
+    db.addKeyword(ALLOWED, 'nike');
     const keywords = db.listKeywordsWithId(ALLOWED);
     const kwId = keywords[0].id;
 
@@ -473,7 +432,7 @@ describe('callback_query handler', () => {
     const call = bot.editMessageText.mock.calls[0];
     expect(call[0]).toContain('Filtros para');
     expect(call[0]).toContain('nike');
-    expect(call[0]).toContain('Mercado Livre');
+    expect(call[0]).toContain('Enjoei');
     expect(bot.answerCallbackQuery).toHaveBeenCalledWith('query-123');
   });
 
@@ -625,47 +584,6 @@ describe('callback_query handler', () => {
     expect(bot.answerCallbackQuery).toHaveBeenCalledWith('query-123', { text: 'Palavra-chave nao encontrada.' });
   });
 
-  test('ML filter toggle: cond novo', async () => {
-    db.addKeyword(ALLOWED, 'nike', null, 'ml');
-    const keywords = db.listKeywordsWithId(ALLOWED);
-    const kwId = keywords[0].id;
-
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulateCallback(ALLOWED, `f:${kwId}:cond:novo`);
-
-    const updated = db.getKeywordByIdAndChat(kwId, ALLOWED);
-    const filters = JSON.parse(updated.filters);
-    expect(filters.cond).toBe('novo');
-  });
-
-  test('ML filter toggle: ship', async () => {
-    db.addKeyword(ALLOWED, 'nike', null, 'ml');
-    const keywords = db.listKeywordsWithId(ALLOWED);
-    const kwId = keywords[0].id;
-
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulateCallback(ALLOWED, `f:${kwId}:ship:t`);
-
-    const updated = db.getKeywordByIdAndChat(kwId, ALLOWED);
-    const filters = JSON.parse(updated.filters);
-    expect(filters.ship).toBe(true);
-  });
-
-  test('OLX filter toggle: sort date', async () => {
-    db.addKeyword(ALLOWED, 'nike', null, 'olx');
-    const keywords = db.listKeywordsWithId(ALLOWED);
-    const kwId = keywords[0].id;
-
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulateCallback(ALLOWED, `f:${kwId}:sort:date`);
-
-    const updated = db.getKeywordByIdAndChat(kwId, ALLOWED);
-    const filters = JSON.parse(updated.filters);
-    expect(filters.sort).toBe('date');
-  });
 });
 
 describe('parsePrice', () => {
@@ -764,13 +682,6 @@ describe('formatFiltersSummary', () => {
     expect(result).toContain('menor preco');
   });
 
-  test('formata filtro ML cond', () => {
-    expect(formatFiltersSummary({ cond: 'novo' }, 'ml')).toBe(' [novo]');
-  });
-
-  test('formata filtro ML frete', () => {
-    expect(formatFiltersSummary({ ship: true }, 'ml')).toBe(' [frete gratis]');
-  });
 });
 
 describe('buildFilterKeyboard', () => {
@@ -784,24 +695,6 @@ describe('buildFilterKeyboard', () => {
     expect(rows).toHaveLength(7);
     // Clear row
     expect(rows[6][0].text).toContain('Limpar');
-  });
-
-  test('constroi teclado ML com filtros inativos', () => {
-    const keyboard = buildFilterKeyboard({ id: 1, keyword: 'nike', filters: null, platform: 'ml' });
-    expect(keyboard).toHaveProperty('inline_keyboard');
-    const rows = keyboard.inline_keyboard;
-    // cond, sort, ship, clear = 4 rows
-    expect(rows).toHaveLength(4);
-    expect(rows[0][0].text).toContain('Novo');
-    expect(rows[0][1].text).toContain('Usado');
-  });
-
-  test('constroi teclado OLX com filtros inativos', () => {
-    const keyboard = buildFilterKeyboard({ id: 1, keyword: 'nike', filters: null, platform: 'olx' });
-    expect(keyboard).toHaveProperty('inline_keyboard');
-    const rows = keyboard.inline_keyboard;
-    // sort1, sort2, clear = 3 rows
-    expect(rows).toHaveLength(3);
   });
 
   test('constroi teclado enjoei com filtros ativos', () => {

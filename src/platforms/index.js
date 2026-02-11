@@ -1,19 +1,19 @@
 const enjoei = require('./enjoei');
-const mercadolivre = require('./mercadolivre');
-const olx = require('./olx');
+// const mercadolivre = require('./mercadolivre');
+// const olx = require('./olx');
 
 const platforms = {
   enjoei,
-  ml: mercadolivre,
-  olx,
+  // ml: mercadolivre,
+  // olx,
 };
 
 const PLATFORM_ALIASES = {
   enjoei: 'enjoei',
-  ml: 'ml',
-  mercadolivre: 'ml',
-  'mercado livre': 'ml',
-  olx: 'olx',
+  // ml: 'ml',
+  // mercadolivre: 'ml',
+  // 'mercado livre': 'ml',
+  // olx: 'olx',
 };
 
 const DEFAULT_PLATFORM = 'enjoei';

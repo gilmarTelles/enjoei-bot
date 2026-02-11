@@ -31,28 +31,5 @@ describe('formatProduct', () => {
     expect(result).toContain('N/A');
   });
 
-  test('formatar produto com platform ml', () => {
-    const product = {
-      title: 'Camiseta Nike',
-      price: 'R$ 50',
-      url: 'https://www.mercadolivre.com.br/camiseta-nike',
-    };
-    const result = formatProduct(product, 'nike', 'ml');
-
-    expect(result).toContain('Novo item no Mercado Livre');
-    expect(result).toContain('R$ 50');
-    expect(result).toContain('"nike"');
-  });
-
-  test('formatar produto com platform olx', () => {
-    const product = {
-      title: 'Camiseta Nike',
-      price: 'R$ 50',
-      url: 'https://www.olx.com.br/d/camiseta-nike',
-    };
-    const result = formatProduct(product, 'nike', 'olx');
-
-    expect(result).toContain('Novo item no OLX');
-  });
 });
 
