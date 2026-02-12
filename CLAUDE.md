@@ -23,17 +23,9 @@ npm test
 ```
 
 ### Production Server
+SSH credentials are in `.env` (`SSH_SERVER`, `SSH_PROJECT_DIR`).
 ```bash
-# SSH into the server
-ssh $SSH_SERVER
-
-# Project directory on the server
-cd ~/enjoei-bot
-
-# Deploy latest changes (from server)
-git pull && pm2 restart enjoei-bot
-
-# Or deploy from local machine in one command
+# Deploy from local machine
 ssh $SSH_SERVER "cd enjoei-bot && git pull && pm2 restart enjoei-bot"
 
 # View logs
