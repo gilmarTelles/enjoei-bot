@@ -614,6 +614,50 @@ describe('parsePrice', () => {
   });
 });
 
+describe('sanitizeKeyword', () => {
+  const { sanitizeKeyword } = commands;
+
+  test('remove smart double quotes', () => {
+    expect(sanitizeKeyword('\u201Crogerio-ceni\u201D')).toBe('rogerio-ceni');
+  });
+
+  test('remove smart single quotes', () => {
+    expect(sanitizeKeyword('\u2018nike\u2019')).toBe('nike');
+  });
+
+  test('remove angle brackets', () => {
+    expect(sanitizeKeyword('<bermuda nuska>')).toBe('bermuda nuska');
+  });
+
+  test('remove square brackets', () => {
+    expect(sanitizeKeyword('[nike air]')).toBe('nike air');
+  });
+
+  test('remove curly braces', () => {
+    expect(sanitizeKeyword('{camisa}')).toBe('camisa');
+  });
+
+  test('remove backslash and pipe', () => {
+    expect(sanitizeKeyword('nike|adidas\\puma')).toBe('nikeadidaspuma');
+  });
+
+  test('collapse multiple spaces', () => {
+    expect(sanitizeKeyword('nike   air   max')).toBe('nike air max');
+  });
+
+  test('trim whitespace', () => {
+    expect(sanitizeKeyword('  nike air max  ')).toBe('nike air max');
+  });
+
+  test('normal keyword passes through unchanged', () => {
+    expect(sanitizeKeyword('camisa sao paulo')).toBe('camisa sao paulo');
+  });
+
+  test('keyword with accents passes through', () => {
+    expect(sanitizeKeyword('rogério ceni')).toBe('rogério ceni');
+  });
+});
+
 describe('parseFilters', () => {
   const { parseFilters } = commands;
 

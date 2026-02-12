@@ -29,6 +29,15 @@ function setStatusData(data) {
   statusData = data;
 }
 
+function sanitizeKeyword(keyword) {
+  return keyword
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '') // smart double quotes
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, '') // smart single quotes
+    .replace(/[<>{}[\]|\\^~`]/g, '')                         // brackets and special chars
+    .replace(/\s+/g, ' ')                                     // collapse whitespace
+    .trim();
+}
+
 function parsePrice(priceStr) {
   if (!priceStr) return null;
   const cleaned = priceStr.replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
@@ -167,11 +176,12 @@ function register(bot) {
           // Then parse optional price filter: "nike air max < 200"
           let keyword = argWithoutPlatform;
           let maxPrice = null;
-          const priceMatch = argWithoutPlatform.match(/^(.+?)\s*<\s*(\d+(?:[.,]\d+)?)\s*$/);
+          const priceMatch = keyword.match(/^(.+?)\s*<\s*(\d+(?:[.,]\d+)?)\s*$/);
           if (priceMatch) {
             keyword = priceMatch[1].trim();
             maxPrice = parseFloat(priceMatch[2].replace(',', '.'));
           }
+          keyword = sanitizeKeyword(keyword);
 
           if (keyword.length < KEYWORD_MIN_LEN) {
             await sendMessage(chatId, `Palavra-chave muito curta (minimo ${KEYWORD_MIN_LEN} caracteres).`);
@@ -428,4 +438,4 @@ function register(bot) {
   });
 }
 
-module.exports = { register, setCheckCallback, setStatusData, parsePrice, parseFilters, formatFiltersSummary, buildFilterKeyboard };
+module.exports = { register, setCheckCallback, setStatusData, parsePrice, parseFilters, formatFiltersSummary, buildFilterKeyboard, sanitizeKeyword };
