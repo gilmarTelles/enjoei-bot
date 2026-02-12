@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Telegram bot that monitors Brazilian marketplace platforms (Enjoei, Mercado Livre, OLX) for new product listings matching user-defined keywords. Sends alerts via Telegram with product details including photo, price, and link. Includes AI-powered relevance filtering using Claude API.
+Telegram bot that monitors the Enjoei marketplace for new product listings matching user-defined keywords. Sends alerts via Telegram with product details including photo, price, and link. Includes AI-powered relevance filtering using Claude API. Multi-platform architecture exists (Mercado Livre, OLX) but only Enjoei is currently active.
 
 ## Common Commands
 
@@ -90,8 +90,8 @@ The bot uses a plugin-based architecture for marketplace platforms:
 
 4. **Command Handler** (`src/commands.js`)
    - Telegram bot commands: `/adicionar`, `/remover`, `/listar`, `/buscar`, `/ajuda`, etc.
-   - Interactive filters: buttons for selecting min_price, max_price, category
-   - Supports platform selection via syntax like `palavra:enjoei` or `palavra:ml`
+   - Interactive filters via Telegram inline keyboard buttons
+   - Keyword sanitization: strips smart quotes, brackets, and special characters on input
 
 5. **Notifier** (`src/notifier.js`)
    - Formats and sends Telegram notifications for new products
@@ -127,6 +127,7 @@ Required in `.env`:
 ```
 TELEGRAM_BOT_TOKEN=your_token_here
 CHECK_INTERVAL=5  # Minutes between keyword checks
+ALLOWED_USERS=chat_id1,chat_id2  # Comma-separated Telegram chat IDs
 ```
 
 Optional:
@@ -135,7 +136,23 @@ ADMIN_CHAT_ID=your_chat_id  # For error notifications
 ANTHROPIC_API_KEY=your_key  # For AI relevance filtering
 ENABLE_RELEVANCE_FILTER=true  # Enable AI filtering
 PUPPETEER_EXECUTABLE_PATH=/path/to/chromium  # Custom browser path
+SSH_SERVER=user@host  # Production server SSH
+SSH_PROJECT_DIR=~/enjoei-bot  # Project path on server
 ```
+
+## Enjoei URL Filter Params
+
+The bot builds search URLs matching Enjoei's real format:
+`https://www.enjoei.com.br/{slug}/s?q={slug}&{params}`
+
+| Filter | DB key | URL param | Values |
+|--------|--------|-----------|--------|
+| Period | `lp` | `lp` | `24h` (default), `7d`, `14d`, `30d` |
+| Used only | `used` | `u` | `true` or absent |
+| Department | `dep` | `d` | `masculino`, `feminino` |
+| Size | `sz` | `st[sc]` | `pp`, `p`, `m`, `g`, `gg` |
+| Region | `sr` | `sr` | `near_regions`, `same_country` |
+| Sort | `sort` | `sort` | `price_asc`, `price_desc` |
 
 ## Adding a New Platform
 
