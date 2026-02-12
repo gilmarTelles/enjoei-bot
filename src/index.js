@@ -191,7 +191,7 @@ async function runCheck() {
     const activeChatIds = chatIds.filter(cid => !pausedSet.has(cid));
     for (const cid of activeChatIds) {
       try {
-        await telegram.sendMessage(cid, EASTER_EGG);
+        await telegram.sendMessage(cid, EASTER_EGG, { parse_mode: undefined });
       } catch (err) {
         console.error(`[easter] Erro ao enviar para ${cid}:`, err.message);
       }
