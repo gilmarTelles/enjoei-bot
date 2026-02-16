@@ -23,6 +23,7 @@ if (!TELEGRAM_BOT_TOKEN) {
 }
 
 let consecutiveEmptyChecks = 0;
+let checkRunning = false;
 
 
 async function notifyAdmin(text) {
@@ -58,6 +59,12 @@ function parseFiltersJson(filtersStr) {
 }
 
 async function runCheck() {
+  if (checkRunning) {
+    console.log('[check] Verificacao anterior ainda em andamento, pulando.');
+    return { totalNew: 0, byPlatform: {} };
+  }
+  checkRunning = true;
+  try {
   const allUserKeywords = db.getAllUserKeywords();
   if (allUserKeywords.length === 0) {
     console.log('[check] Nenhuma palavra-chave de nenhum usuario, pulando.');
@@ -179,6 +186,9 @@ async function runCheck() {
 
 
   return { totalNew: totalNewProducts, byPlatform };
+  } finally {
+    checkRunning = false;
+  }
 }
 
 async function main() {
