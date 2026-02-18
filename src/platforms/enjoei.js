@@ -51,7 +51,14 @@ async function scrapePage(browser, keyword, filters) {
       const results = [];
       const cards = document.querySelectorAll('.c-product-card');
 
+      // Featured store sections appear as nested <section> elements inside the
+      // main <section>. Their cards are not real search results, so exclude them.
+      const featuredCards = new Set(
+        [...document.querySelectorAll('main > section section .c-product-card')]
+      );
+
       for (const card of cards) {
+        if (featuredCards.has(card)) continue;
         const linkEl = card.querySelector('a[href*="/p/"]');
         if (!linkEl) continue;
 
