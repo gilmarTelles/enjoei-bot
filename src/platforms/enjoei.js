@@ -96,11 +96,15 @@ async function scrapePage(browser, keyword, filters) {
         const imgEl = card.querySelector('img.c-product-card__img');
         const image = imgEl ? imgEl.getAttribute('src') : '';
 
+        // Seller name
+        const sellerEl = card.querySelector('.l-store-info__seller-title');
+        const seller = sellerEl ? sellerEl.textContent.trim() : '';
+
         // Clean the URL (remove tracking params)
         const cleanHref = href.split('?')[0];
         const url = `https://www.enjoei.com.br${cleanHref}`;
 
-        results.push({ id: productSlug, title, price, url, image });
+        results.push({ id: productSlug, title, price, url, image, seller });
       }
 
       return results;

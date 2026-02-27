@@ -37,6 +37,14 @@ function init() {
       chat_id TEXT PRIMARY KEY,
       paused INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS blocked_sellers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL,
+      seller TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(chat_id, seller)
+    );
   `);
 
   // Migration: add max_price column to keywords
@@ -210,6 +218,32 @@ function getDb() {
   return db;
 }
 
+function blockSeller(chatId, seller) {
+  const normalized = seller.toLowerCase().trim();
+  try {
+    db.prepare('INSERT OR IGNORE INTO blocked_sellers (chat_id, seller) VALUES (?, ?)').run(chatId, normalized);
+    return true;
+  } catch (err) {
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return false;
+    throw err;
+  }
+}
+
+function unblockSeller(chatId, seller) {
+  const normalized = seller.toLowerCase().trim();
+  const result = db.prepare('DELETE FROM blocked_sellers WHERE chat_id = ? AND seller = ?').run(chatId, normalized);
+  return result.changes > 0;
+}
+
+function listBlockedSellers(chatId) {
+  return db.prepare('SELECT seller FROM blocked_sellers WHERE chat_id = ? ORDER BY created_at').all(chatId).map(r => r.seller);
+}
+
+function getBlockedSellerSet(chatId) {
+  const sellers = listBlockedSellers(chatId);
+  return new Set(sellers);
+}
+
 function getSeenProductRowId(productId, keyword, chatId, platform = 'enjoei') {
   const row = db.prepare('SELECT id FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').get(productId, keyword, chatId, platform);
   return row ? row.id : null;
@@ -222,4 +256,5 @@ module.exports = {
   countKeywords, purgeOldProducts, backupDb, getDb,
   setPaused, isPaused,
   getSeenProductRowId,
+  blockSeller, unblockSeller, listBlockedSellers, getBlockedSellerSet,
 };

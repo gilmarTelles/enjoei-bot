@@ -334,6 +334,47 @@ function register(bot) {
           break;
         }
 
+        case '/bloquear': {
+          if (!arg) {
+            await sendMessage(chatId, 'Uso: /bloquear <vendedor>\nExemplo: /bloquear nomeusuario');
+            return;
+          }
+          const seller = arg.toLowerCase().trim();
+          const blocked = db.blockSeller(chatId, seller);
+          if (blocked) {
+            await sendMessage(chatId, `Vendedor "${seller}" bloqueado. Produtos desse vendedor nao serao mais exibidos.`);
+          } else {
+            await sendMessage(chatId, `Vendedor "${seller}" ja esta bloqueado.`);
+          }
+          break;
+        }
+
+        case '/desbloquear': {
+          if (!arg) {
+            await sendMessage(chatId, 'Uso: /desbloquear <vendedor>\nExemplo: /desbloquear nomeusuario');
+            return;
+          }
+          const seller = arg.toLowerCase().trim();
+          const unblocked = db.unblockSeller(chatId, seller);
+          if (unblocked) {
+            await sendMessage(chatId, `Vendedor "${seller}" desbloqueado.`);
+          } else {
+            await sendMessage(chatId, `Vendedor "${seller}" nao estava bloqueado.`);
+          }
+          break;
+        }
+
+        case '/bloqueados': {
+          const blockedSellers = db.listBlockedSellers(chatId);
+          if (blockedSellers.length === 0) {
+            await sendMessage(chatId, 'Nenhum vendedor bloqueado.');
+          } else {
+            const list = blockedSellers.map((s, i) => `${i + 1}. ${s}`).join('\n');
+            await sendMessage(chatId, `*Vendedores bloqueados:*\n\n${list}`);
+          }
+          break;
+        }
+
         case '/ajuda':
         case '/start':
         case '/help': {
@@ -348,6 +389,9 @@ function register(bot) {
             '/buscar — Buscar agora',
             '/parar — Pausar notificacoes',
             '/retomar — Retomar notificacoes',
+            '/bloquear <vendedor> — Bloquear vendedor',
+            '/desbloquear <vendedor> — Desbloquear vendedor',
+            '/bloqueados — Ver vendedores bloqueados',
             '/status — Status da ultima verificacao',
             '/ajuda — Mostrar esta mensagem',
           ].join('\n'));
@@ -393,6 +437,14 @@ function register(bot) {
           reply_markup: keyboard,
         });
         await bot.answerCallbackQuery(query.id);
+        return;
+      }
+
+      // Block seller: bs:<seller>
+      if (data.startsWith('bs:')) {
+        const seller = data.substring(3);
+        db.blockSeller(chatId, seller);
+        await bot.answerCallbackQuery(query.id, { text: `Vendedor "${seller}" bloqueado!` });
         return;
       }
 

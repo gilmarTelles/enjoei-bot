@@ -157,6 +157,16 @@ async function runCheck() {
           console.log(`[check] Filtro de palavras exatas removeu ${beforeMatch - filtered.length} produto(s) para "${keyword}"`);
         }
 
+        // Filter out products from blocked sellers
+        const blockedSellers = db.getBlockedSellerSet(chatId);
+        if (blockedSellers.size > 0) {
+          const beforeBlock = filtered.length;
+          filtered = filtered.filter(p => !p.seller || !blockedSellers.has(p.seller.toLowerCase()));
+          if (filtered.length < beforeBlock) {
+            console.log(`[check] Filtro de vendedores bloqueados removeu ${beforeBlock - filtered.length} produto(s)`);
+          }
+        }
+
         const newProducts = [];
         for (const product of filtered) {
           if (!db.isProductSeen(product.id, keyword, chatId, platform)) {
