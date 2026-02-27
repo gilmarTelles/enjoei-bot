@@ -73,6 +73,16 @@ describe('matchesAllWords', () => {
   test('rejects when only some words match', () => {
     expect(matchesAllWords('Camisa Rogerio Azul', 'rogerio ceni')).toBe(false);
   });
+
+  test('matches accented titles with unaccented keywords', () => {
+    expect(matchesAllWords('Camisa São Paulo', 'sao paulo')).toBe(true);
+    expect(matchesAllWords('Seleção Brasileira 2024', 'selecao brasileira')).toBe(true);
+    expect(matchesAllWords('Camisa Rogério Ceni', 'rogerio ceni')).toBe(true);
+  });
+
+  test('matches unaccented titles with accented keywords', () => {
+    expect(matchesAllWords('Camisa Sao Paulo', 'são paulo')).toBe(true);
+  });
 });
 
 describe('escapeRegex', () => {

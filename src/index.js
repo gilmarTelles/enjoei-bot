@@ -21,10 +21,14 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function stripAccents(str) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function matchesAllWords(title, keyword) {
   if (!title) return false;
-  const normalizedTitle = title.toLowerCase();
-  const words = keyword.toLowerCase().split(/\s+/).filter(Boolean);
+  const normalizedTitle = stripAccents(title.toLowerCase());
+  const words = stripAccents(keyword.toLowerCase()).split(/\s+/).filter(Boolean);
   return words.every(word => {
     const regex = new RegExp(`\\b${escapeRegex(word)}\\b`);
     return regex.test(normalizedTitle);
