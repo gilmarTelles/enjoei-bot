@@ -17,6 +17,21 @@ const SCRAPE_DELAY_MS = 3000;
 const PURGE_DAYS = 7;
 const STALE_THRESHOLD = 3;
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchesAllWords(title, keyword) {
+  if (!title) return false;
+  const normalizedTitle = title.toLowerCase();
+  const words = keyword.toLowerCase().split(/\s+/).filter(Boolean);
+  return words.every(word => {
+    const regex = new RegExp(`\\b${escapeRegex(word)}\\b`);
+    return regex.test(normalizedTitle);
+  });
+}
+
+
 if (!TELEGRAM_BOT_TOKEN) {
   console.error('Erro: TELEGRAM_BOT_TOKEN obrigatorio no .env');
   process.exit(1);
@@ -135,6 +150,13 @@ async function runCheck() {
           await notifyAdmin(`Erro no filtro de relevancia para "${keyword}": ${err.message}`);
         }
 
+        // Exact keyword match: every word must appear in the title
+        const beforeMatch = filtered.length;
+        filtered = filtered.filter(p => matchesAllWords(p.title, keyword));
+        if (filtered.length < beforeMatch) {
+          console.log(`[check] Filtro de palavras exatas removeu ${beforeMatch - filtered.length} produto(s) para "${keyword}"`);
+        }
+
         const newProducts = [];
         for (const product of filtered) {
           if (!db.isProductSeen(product.id, keyword, chatId, platform)) {
@@ -244,3 +266,5 @@ main().catch((err) => {
   console.error('[bot] Erro fatal:', err);
   process.exit(1);
 });
+
+module.exports = { matchesAllWords, escapeRegex };
