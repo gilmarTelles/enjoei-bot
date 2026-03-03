@@ -69,8 +69,8 @@ function buildSearchParams(term, filters, sinceTimestamp) {
     if (filters.sr === 'same_country') params.set('shipping_range', 'same_country');
     if (filters.dep) params.set('department', filters.dep);
     if (filters.sz) params.set('size', filters.sz);
-    if (filters.sort === 'price_asc') params.set('sort', 'price_asc');
-    if (filters.sort === 'price_desc') params.set('sort', 'price_desc');
+    // Note: sort filter is applied client-side; the API's sort param expects a
+    // GraphQL SortSearchInput type which is not supported via GET query strings.
   }
 
   return params;
@@ -164,6 +164,10 @@ async function fetchProducts(term, filters, sinceTimestamp) {
 
       const edges = json?.data?.search?.products?.edges;
       if (!Array.isArray(edges)) {
+        // products can be null when no results for a time window — not an error
+        if (json?.data?.search?.products === null && sinceTimestamp) {
+          return [];
+        }
         console.warn(`[enjoeiApi] Unexpected response structure for "${term}"`);
         return [];
       }

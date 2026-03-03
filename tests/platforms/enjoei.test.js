@@ -57,12 +57,11 @@ describe('enjoeiApi.buildSearchParams', () => {
   });
 
   test('maps filters correctly', () => {
-    const params = buildSearchParams('nike', { used: true, sr: 'near_regions', dep: 'masculino', sz: 'g', sort: 'price_asc' }, null);
+    const params = buildSearchParams('nike', { used: true, sr: 'near_regions', dep: 'masculino', sz: 'g' }, null);
     expect(params.get('used')).toBe('true');
     expect(params.get('shipping_range')).toBe('near_regions');
     expect(params.get('department')).toBe('masculino');
     expect(params.get('size')).toBe('g');
-    expect(params.get('sort')).toBe('price_asc');
   });
 });
 
