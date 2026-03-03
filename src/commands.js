@@ -21,6 +21,10 @@ function isAllowedChat(chatId) {
 let checkCallback = null;
 let statusData = null;
 
+// Temporary storage for /adicionar -> platform selection flow
+// Map<chatId, { keyword, maxPrice }>
+const pendingKeywords = new Map();
+
 function setCheckCallback(cb) {
   checkCallback = cb;
 }
@@ -170,11 +174,8 @@ function register(bot) {
             return;
           }
 
-          // First, parse platform from the full arg (platform is last word)
-          const { keyword: argWithoutPlatform, platform } = parsePlatformFromArg(arg);
-
-          // Then parse optional price filter: "nike air max < 200"
-          let keyword = argWithoutPlatform;
+          // Parse optional price filter: "nike air max < 200"
+          let keyword = arg;
           let maxPrice = null;
           const priceMatch = keyword.match(/^(.+?)\s*<\s*(\d+(?:[.,]\d+)?)\s*$/);
           if (priceMatch) {
@@ -196,17 +197,22 @@ function register(bot) {
             await sendMessage(chatId, `Limite de ${MAX_KEYWORDS} palavras-chave atingido. Remova alguma com /remover.`);
             return;
           }
-          const platformModule = getPlatform(platform);
-          const platformLabel = platformModule ? platformModule.platformName : platform;
-          const added = db.addKeyword(chatId, keyword, maxPrice, platform);
-          if (added) {
-            let confirmMsg = `Palavra-chave adicionada: "${keyword.toLowerCase()}" (${platformLabel})`;
-            if (maxPrice) confirmMsg += ` (max R$ ${maxPrice.toFixed(2).replace('.', ',')})`;
-            confirmMsg += '\nUse /filtros para configurar filtros de busca.';
-            await sendMessage(chatId, confirmMsg);
-          } else {
-            await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" ja existe no ${platformLabel}.`);
-          }
+
+          // Store pending keyword and show platform selection keyboard
+          pendingKeywords.set(chatId, { keyword, maxPrice });
+          await bot.sendMessage(chatId, `Escolha a plataforma para "${keyword.toLowerCase()}":`, {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: 'Enjoei', callback_data: 'ap:enjoei' },
+                  { text: 'Mercado Livre', callback_data: 'ap:ml' },
+                ],
+                [
+                  { text: 'Ambos', callback_data: 'ap:both' },
+                ],
+              ],
+            },
+          });
           break;
         }
 
@@ -374,7 +380,6 @@ function register(bot) {
             '*Bot de Buscas - Comandos*',
             '',
             '/adicionar <palavra> — Adicionar palavra-chave',
-            '/adicionar <palavra> ml — Monitorar no Mercado Livre',
             '/adicionar <palavra> < preco — Com filtro de preco',
             '/remover <palavra> — Remover palavra-chave',
             '/listar — Ver suas palavras-chave',
@@ -413,6 +418,51 @@ function register(bot) {
     }
 
     try {
+      // Add pending keyword to platform: ap:<platform>
+      if (data.startsWith('ap:')) {
+        const platformChoice = data.substring(3);
+        const pending = pendingKeywords.get(chatId);
+        if (!pending) {
+          await bot.answerCallbackQuery(query.id, { text: 'Sessao expirada. Use /adicionar novamente.' });
+          return;
+        }
+        pendingKeywords.delete(chatId);
+
+        const platformsToAdd = platformChoice === 'both'
+          ? ['enjoei', 'ml']
+          : [platformChoice];
+
+        const results = [];
+        for (const platform of platformsToAdd) {
+          const added = db.addKeyword(chatId, pending.keyword, pending.maxPrice, platform);
+          const label = getPlatform(platform).platformName;
+          results.push({ platform: label, added });
+        }
+
+        const addedResults = results.filter(r => r.added);
+        const duplicateResults = results.filter(r => !r.added);
+
+        let confirmMsg = '';
+        if (addedResults.length > 0) {
+          const labels = addedResults.map(r => r.platform).join(' e ');
+          confirmMsg = `Palavra-chave adicionada: "${pending.keyword.toLowerCase()}" (${labels})`;
+          if (pending.maxPrice) confirmMsg += ` (max R$ ${pending.maxPrice.toFixed(2).replace('.', ',')})`;
+          confirmMsg += '\nUse /filtros para configurar filtros de busca.';
+        }
+        if (duplicateResults.length > 0) {
+          const labels = duplicateResults.map(r => r.platform).join(' e ');
+          if (confirmMsg) confirmMsg += '\n';
+          confirmMsg += `Palavra-chave "${pending.keyword.toLowerCase()}" ja existe no ${labels}.`;
+        }
+
+        await bot.editMessageText(confirmMsg, {
+          chat_id: chatId,
+          message_id: messageId,
+        });
+        await bot.answerCallbackQuery(query.id);
+        return;
+      }
+
       // Keyword selector: fs:<id>
       if (data.startsWith('fs:')) {
         const kwId = parseInt(data.split(':')[1], 10);
@@ -483,4 +533,4 @@ function register(bot) {
   });
 }
 
-module.exports = { register, setCheckCallback, setStatusData, parsePrice, parseFilters, formatFiltersSummary, buildFilterKeyboard, sanitizeKeyword };
+module.exports = { register, setCheckCallback, setStatusData, parsePrice, parseFilters, formatFiltersSummary, buildFilterKeyboard, sanitizeKeyword, pendingKeywords };
