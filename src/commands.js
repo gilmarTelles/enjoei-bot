@@ -216,16 +216,14 @@ function register(bot) {
             return;
           }
           const { keyword: kw, platform: rmPlatform } = parsePlatformFromArg(arg);
-          // If platform was explicitly given, remove from that platform only
-          const platformGiven = rmPlatform !== DEFAULT_PLATFORM || resolvePlatformAlias(arg.trim().split(/\s+/).pop());
-          const removed = platformGiven
-            ? db.removeKeyword(chatId, kw, rmPlatform)
-            : db.removeKeyword(chatId, arg);
+          // Always remove from the parsed platform (defaults to enjoei if none specified)
+          const removed = db.removeKeyword(chatId, kw, rmPlatform);
+          const rmPlatformModule = getPlatform(rmPlatform);
+          const rmLabel = rmPlatformModule ? rmPlatformModule.platformName : rmPlatform;
           if (removed) {
-            const label = platformGiven ? ` (${getPlatform(rmPlatform)?.platformName || rmPlatform})` : '';
-            await sendMessage(chatId, `Palavra-chave removida: "${(platformGiven ? kw : arg).toLowerCase()}"${label}`);
+            await sendMessage(chatId, `Palavra-chave removida: "${kw.toLowerCase()}" (${rmLabel})`);
           } else {
-            await sendMessage(chatId, `Palavra-chave "${(platformGiven ? kw : arg).toLowerCase()}" nao encontrada.`);
+            await sendMessage(chatId, `Palavra-chave "${kw.toLowerCase()}" nao encontrada no ${rmLabel}.`);
           }
           break;
         }
@@ -251,18 +249,11 @@ function register(bot) {
 
         case '/filtros': {
           if (arg) {
-            // Find keyword by name (optionally with platform)
             const { keyword: fkw, platform: fplatform } = parsePlatformFromArg(arg);
             const keywords = db.listKeywordsWithId(chatId);
-            const platformGiven = fplatform !== DEFAULT_PLATFORM || resolvePlatformAlias(arg.trim().split(/\s+/).pop());
-            let match;
-            if (platformGiven) {
-              match = keywords.find(k => k.keyword === fkw.toLowerCase().trim() && k.platform === fplatform);
-            } else {
-              match = keywords.find(k => k.keyword === arg.toLowerCase().trim());
-            }
+            const match = keywords.find(k => k.keyword === fkw.toLowerCase().trim() && k.platform === fplatform);
             if (!match) {
-              await sendMessage(chatId, `Palavra-chave "${arg.toLowerCase()}" nao encontrada.`);
+              await sendMessage(chatId, `Palavra-chave "${fkw.toLowerCase()}" nao encontrada.`);
               return;
             }
             await showFilterKeyboard(bot, chatId, match);
@@ -273,10 +264,11 @@ function register(bot) {
         }
 
         case '/buscar': {
-          await sendMessage(chatId, 'Buscando agora...');
           if (checkCallback) {
             const summary = await checkCallback();
-            if (summary) {
+            if (summary === null) {
+              await sendMessage(chatId, 'Uma verificacao ja esta em andamento. Tente novamente em breve.');
+            } else if (summary) {
               const platformParts = [];
               if (summary.byPlatform) {
                 for (const [key, count] of Object.entries(summary.byPlatform)) {
@@ -382,6 +374,7 @@ function register(bot) {
             '*Bot de Buscas - Comandos*',
             '',
             '/adicionar <palavra> — Adicionar palavra-chave',
+            '/adicionar <palavra> ml — Monitorar no Mercado Livre',
             '/adicionar <palavra> < preco — Com filtro de preco',
             '/remover <palavra> — Remover palavra-chave',
             '/listar — Ver suas palavras-chave',
@@ -399,7 +392,7 @@ function register(bot) {
         }
 
         default:
-          await sendMessage(chatId, `Comando desconhecido: ${command}\nEnvie /ajuda para ver os comandos disponiveis.`);
+          await sendMessage(chatId, `Comando desconhecido. Envie /ajuda para ver os comandos disponiveis.`);
           break;
       }
     } catch (err) {

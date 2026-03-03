@@ -59,7 +59,7 @@ async function runMaintenance() {
     const purged = db.purgeOldProducts(PURGE_DAYS);
     console.log(`[maintenance] ${purged} produto(s) antigo(s) removido(s) (>${PURGE_DAYS} dias)`);
 
-    const backupPath = db.backupDb();
+    const backupPath = await db.backupDb();
     console.log(`[maintenance] Backup salvo em ${backupPath}`);
   } catch (err) {
     console.error('[maintenance] Erro:', err.message);
@@ -80,7 +80,7 @@ function parseFiltersJson(filtersStr) {
 async function runCheck() {
   if (checkRunning) {
     console.log('[check] Verificacao anterior ainda em andamento, pulando.');
-    return { totalNew: 0, byPlatform: {} };
+    return null;
   }
   checkRunning = true;
   try {
@@ -121,6 +121,7 @@ async function runCheck() {
   let totalNewProducts = 0;
   const byPlatform = {};
   let allEmpty = true;
+  let hadScrapeError = false;
 
   for (let i = 0; i < groups.length; i++) {
     const { keyword, filters, platform, users } = groups[i];
@@ -135,30 +136,31 @@ async function runCheck() {
 
       if (products.length > 0) allEmpty = false;
 
+      // AI relevance filter (once per scrape group, not per user)
+      let aiFiltered = products;
+      try {
+        aiFiltered = await filterByRelevance(products, keyword);
+      } catch (err) {
+        console.error(`[check] Erro no filtro de relevancia: ${err.message}`);
+        await notifyAdmin(`Erro no filtro de relevancia para "${keyword}": ${err.message}`);
+      }
+
+      // Exact keyword match (also shared across users)
+      const beforeMatch = aiFiltered.length;
+      const matchedProducts = aiFiltered.filter(p => matchesAllWords(p.title, keyword));
+      if (matchedProducts.length < beforeMatch) {
+        console.log(`[check] Filtro de palavras exatas removeu ${beforeMatch - matchedProducts.length} produto(s) para "${keyword}"`);
+      }
+
       // For each user watching this keyword+filters combo
       for (const { chatId, maxPrice } of users) {
         // Filter by price if user set a max_price
-        let filtered = products;
+        let filtered = matchedProducts;
         if (maxPrice) {
-          filtered = products.filter(p => {
+          filtered = filtered.filter(p => {
             const price = parsePrice(p.price);
             return price !== null && price <= maxPrice;
           });
-        }
-
-        // AI relevance filter
-        try {
-          filtered = await filterByRelevance(filtered, keyword);
-        } catch (err) {
-          console.error(`[check] Erro no filtro de relevancia: ${err.message}`);
-          await notifyAdmin(`Erro no filtro de relevancia para "${keyword}": ${err.message}`);
-        }
-
-        // Exact keyword match: every word must appear in the title
-        const beforeMatch = filtered.length;
-        filtered = filtered.filter(p => matchesAllWords(p.title, keyword));
-        if (filtered.length < beforeMatch) {
-          console.log(`[check] Filtro de palavras exatas removeu ${beforeMatch - filtered.length} produto(s) para "${keyword}"`);
         }
 
         // Filter out products from blocked sellers
@@ -175,7 +177,6 @@ async function runCheck() {
         for (const product of filtered) {
           if (!db.isProductSeen(product.id, keyword, chatId, platform)) {
             newProducts.push(product);
-            db.markProductSeen(product, keyword, chatId, platform);
           }
         }
 
@@ -184,6 +185,10 @@ async function runCheck() {
           totalNewProducts += newProducts.length;
           byPlatform[platform] = (byPlatform[platform] || 0) + newProducts.length;
           await notifyNewProducts(newProducts, keyword, chatId, platform);
+          // Mark as seen after notification to avoid losing products on send failure
+          for (const product of newProducts) {
+            db.markProductSeen(product, keyword, chatId, platform);
+          }
         }
       }
 
@@ -193,6 +198,7 @@ async function runCheck() {
       }
     } catch (err) {
       // Platform-isolated error: warn admin but continue with other platforms/keywords
+      hadScrapeError = true;
       console.error(`[check] Erro em "${keyword}" [${platformLabel}]:`, err.message);
       await notifyAdmin(`Erro ao buscar "${keyword}" [${platformLabel}]: ${err.message}`);
     }
@@ -200,12 +206,15 @@ async function runCheck() {
 
   // Stale selector detection
   if (allEmpty && groups.length > 0) {
-    consecutiveEmptyChecks++;
-    console.warn(`[check] Todas as buscas vazias (${consecutiveEmptyChecks}x consecutivas)`);
-    if (consecutiveEmptyChecks >= STALE_THRESHOLD) {
-      await notifyAdmin(`ALERTA: ${consecutiveEmptyChecks} verificacoes consecutivas sem resultados. Os seletores CSS podem ter mudado!`);
+    if (!hadScrapeError) {
+      consecutiveEmptyChecks++;
+      console.warn(`[check] Todas as buscas vazias (${consecutiveEmptyChecks}x consecutivas)`);
+      if (consecutiveEmptyChecks >= STALE_THRESHOLD) {
+        await notifyAdmin(`ALERTA: ${consecutiveEmptyChecks} verificacoes consecutivas sem resultados. Os seletores CSS podem ter mudado!`);
+      }
     }
-  } else {
+    // When hadScrapeError: don't increment but don't reset either
+  } else if (!allEmpty) {
     consecutiveEmptyChecks = 0;
   }
 

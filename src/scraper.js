@@ -3,6 +3,7 @@ const { getPlatform, DEFAULT_PLATFORM } = require('./platforms');
 
 let browser = null;
 let launchTime = null;
+let launchPromise = null;
 const BROWSER_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 async function launchBrowser() {
@@ -14,39 +15,50 @@ async function launchBrowser() {
 
   if (browser && browser.connected) return browser;
 
-  const launchOptions = {
-    headless: true,
-    timeout: 60000,
-    protocolTimeout: 60000,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--disable-extensions',
-      '--disable-background-networking',
-      '--disable-default-apps',
-      '--disable-sync',
-      '--disable-translate',
-      '--no-first-run',
-      '--single-process',
-      '--no-zygote',
-    ],
-  };
+  // Prevent concurrent launches from creating orphaned browser instances
+  if (launchPromise) return launchPromise;
 
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
+  launchPromise = (async () => {
+    const launchOptions = {
+      headless: true,
+      timeout: 60000,
+      protocolTimeout: 60000,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--disable-translate',
+        '--no-first-run',
+        '--single-process',
+        '--no-zygote',
+      ],
+    };
 
-  browser = await puppeteer.launch(launchOptions);
-  launchTime = Date.now();
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
 
-  browser.on('disconnected', () => {
-    browser = null;
-    launchTime = null;
-  });
+    const b = await puppeteer.launch(launchOptions);
+    browser = b;
+    launchTime = Date.now();
 
-  return browser;
+    b.on('disconnected', () => {
+      // Only null out if this is still the active browser instance
+      if (browser === b) {
+        browser = null;
+        launchTime = null;
+      }
+    });
+
+    return b;
+  })().finally(() => { launchPromise = null; });
+
+  return launchPromise;
 }
 
 const MAX_RETRIES = 2;
@@ -79,9 +91,10 @@ async function searchProducts(keyword, filters, platform) {
 
 async function closeBrowser() {
   if (browser) {
-    await browser.close().catch(() => {});
+    const b = browser;
     browser = null;
     launchTime = null;
+    await b.close().catch(() => {});
   }
 }
 

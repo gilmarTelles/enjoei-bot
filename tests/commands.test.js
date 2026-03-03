@@ -6,6 +6,7 @@ const db = require('../src/db');
 jest.mock('../src/telegram', () => ({
   sendMessage: jest.fn(async () => {}),
   sendPhoto: jest.fn(async () => {}),
+  escapeMd: (text) => text ? String(text).replace(/([_*`\[\]])/g, '\\$1') : '',
 }));
 
 const telegram = require('../src/telegram');
@@ -42,13 +43,18 @@ function createMockBot() {
   };
 }
 
+const path = require('path');
+const fs = require('fs');
+const TEST_DB = path.join(__dirname, '..', 'data', 'test_commands.db');
+
 beforeAll(() => {
-  db.init();
+  db.init(TEST_DB);
 });
 
 afterAll(() => {
   const instance = db.getDb();
   if (instance) instance.close();
+  try { fs.unlinkSync(TEST_DB); } catch {};
 });
 
 beforeEach(() => {
@@ -56,6 +62,7 @@ beforeEach(() => {
   instance.exec('DELETE FROM keywords');
   instance.exec('DELETE FROM seen_products');
   instance.exec('DELETE FROM user_settings');
+  instance.exec('DELETE FROM blocked_sellers');
   telegram.sendMessage.mockClear();
 });
 
@@ -281,9 +288,7 @@ describe('Commands', () => {
     }));
     telegram.sendMessage.mockClear();
     await bot.simulate(ALLOWED, '/buscar');
-    // First call: "Buscando agora..."
-    // Second call: summary
-    const summaryMsg = telegram.sendMessage.mock.calls[1][1];
+    const summaryMsg = telegram.sendMessage.mock.calls[0][1];
     expect(summaryMsg).toContain('Busca concluida');
     expect(summaryMsg).toContain('3 novo(s)');
     expect(summaryMsg).toContain('Enjoei: 3');
@@ -298,7 +303,7 @@ describe('Commands', () => {
     }));
     telegram.sendMessage.mockClear();
     await bot.simulate(ALLOWED, '/buscar');
-    const summaryMsg = telegram.sendMessage.mock.calls[1][1];
+    const summaryMsg = telegram.sendMessage.mock.calls[0][1];
     expect(summaryMsg).toContain('0 novo(s)');
   });
 });

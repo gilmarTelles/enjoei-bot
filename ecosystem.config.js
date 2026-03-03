@@ -7,6 +7,15 @@ module.exports = {
     max_memory_restart: '300M',
     env: {
       NODE_ENV: 'production',
+      // Required — set these or ensure .env is present on the server:
+      // TELEGRAM_BOT_TOKEN: '',
+      // ALLOWED_USERS: '',
+      // CHECK_INTERVAL: '5',
+      // Optional:
+      // ADMIN_CHAT_ID: '',
+      // ANTHROPIC_API_KEY: '',
+      // ENABLE_RELEVANCE_FILTER: 'false',
+      // PUPPETEER_EXECUTABLE_PATH: '',
     },
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
     error_file: 'logs/error.log',

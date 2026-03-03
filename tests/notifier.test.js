@@ -1,6 +1,7 @@
 jest.mock('../src/telegram', () => ({
   sendMessage: jest.fn(async () => {}),
   sendPhoto: jest.fn(async () => {}),
+  escapeMd: (text) => text ? String(text).replace(/([_*`\[\]])/g, '\\$1') : '',
 }));
 
 const { formatProduct } = require('../src/notifier');

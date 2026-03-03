@@ -1,32 +1,40 @@
 const platformKey = 'ml';
 const platformName = 'Mercado Livre';
 
+const ML_SIZE_IDS = {
+  pp: '13853810',
+  p: '13853811',
+  m: '13853813',
+  g: '13853814',
+  gg: '13853815',
+  xg: '13853816',
+  xgg: '13853817',
+};
+
+const ML_SIZE_LABELS = {
+  pp: 'PP', p: 'P', m: 'M', g: 'G', gg: 'GG', xg: 'XG',
+};
+
 function buildSearchUrl(keyword, filters) {
   const slug = keyword.trim().replace(/\s+/g, '-');
   let url = `https://lista.mercadolivre.com.br/${encodeURIComponent(slug)}`;
 
   const segments = [];
 
-  // Default: sort by most recent (newly listed)
-  let sortApplied = false;
-
   if (filters) {
-    if (filters.cond === 'usado') segments.push('_Desde_USADO');
-    if (filters.cond === 'novo') segments.push('_Desde_NOVO');
-    if (filters.sort === 'price_asc') { segments.push('_OrderId_PRICE'); sortApplied = true; }
-    if (filters.sort === 'price_desc') { segments.push('_OrderId_PRICE*DESC'); sortApplied = true; }
-    if (filters.sort === 'recent') { segments.push('_OrderId_PRICE*RELEVANCE'); sortApplied = true; }
-    if (filters.ship) segments.push('_Frete_Gr%C3%A1tis');
-  }
-
-  // Default to most recent listings if no sort specified
-  if (!sortApplied) {
-    segments.push('_OrderId_PriceAsc_PublishedToday');
+    if (filters.cond === 'usado') segments.push('_ITEM*CONDITION_2230581');
+    if (filters.cond === 'novo') segments.push('_ITEM*CONDITION_2230284');
+    if (filters.sz && ML_SIZE_IDS[filters.sz]) segments.push(`_FILTRABLE*SIZE_${ML_SIZE_IDS[filters.sz]}`);
+    if (filters.sort === 'price_asc') segments.push('_OrderId_PRICE');
+    if (filters.sort === 'price_desc') segments.push('_OrderId_PRICE*DESC');
+    if (filters.ship) segments.push('_CustoFrete_Gratis');
   }
 
   if (segments.length > 0) {
     url += segments.join('');
   }
+
+  url += '_NoIndex_True';
 
   return url;
 }
@@ -46,41 +54,45 @@ async function scrapePage(browser, keyword, filters) {
       timeout: 60000,
     });
 
-    await page.waitForSelector('div.ui-search-result__content-wrapper', { timeout: 15000 }).catch(() => null);
+    await page.waitForSelector('li.ui-search-layout__item', { timeout: 15000 }).catch(() => null);
     await new Promise(r => setTimeout(r, 2000));
 
     const products = await page.evaluate(() => {
       const results = [];
-      const cards = document.querySelectorAll('div.ui-search-result__content-wrapper');
+      const items = document.querySelectorAll('li.ui-search-layout__item');
 
-      for (const card of cards) {
-        const linkEl = card.querySelector('a.ui-search-link');
-        if (!linkEl) continue;
+      for (const item of items) {
+        const titleEl = item.querySelector('a.poly-component__title');
+        if (!titleEl) continue;
 
-        const href = linkEl.getAttribute('href') || '';
-        // Extract ML item ID from URL (e.g., MLB-1234567890)
-        const idMatch = href.match(/MLB-?\d+/i);
-        const productId = idMatch ? idMatch[0] : href;
+        const href = titleEl.getAttribute('href') || '';
+        const title = titleEl.textContent.trim();
 
-        const titleEl = card.querySelector('h2.ui-search-item__title');
-        const title = titleEl ? titleEl.textContent.trim() : '';
+        // Extract ML item ID from tracking URL (e.g., MLB100885424155)
+        let productId = '';
+        const allEls = item.querySelectorAll('*');
+        for (const el of allEls) {
+          for (const attr of el.attributes) {
+            const match = attr.value.match(/MLB-?\d+/i);
+            if (match) { productId = match[0]; break; }
+          }
+          if (productId) break;
+        }
+        if (!productId) productId = href;
 
-        const priceEl = card.querySelector('span.andes-money-amount__fraction');
+        const priceEl = item.querySelector('span.andes-money-amount__fraction');
         let price = '';
         if (priceEl) {
           price = `R$ ${priceEl.textContent.trim()}`;
         }
 
-        const imgEl = card.closest('.ui-search-result')?.querySelector('img');
+        const imgEl = item.querySelector('img');
         let image = '';
         if (imgEl) {
           image = imgEl.getAttribute('data-zoom') || imgEl.getAttribute('src') || '';
         }
 
-        // Clean URL (remove tracking params)
-        const cleanUrl = href.split('?')[0].split('#')[0];
-
-        results.push({ id: productId, title, price, url: cleanUrl, image });
+        results.push({ id: productId, title, price, url: href, image });
       }
 
       return results;
@@ -105,12 +117,19 @@ function buildFilterKeyboard(keywordRow) {
   const sortDLabel = filters.sort === 'price_desc' ? '\u2705 Maior preco' : '\u2B1C Maior preco';
   const shipLabel = filters.ship ? '\u2705 Frete gratis' : '\u274C Frete gratis';
 
+  // Size row
+  const sizeButtons = Object.entries(ML_SIZE_LABELS).map(([key, label]) => ({
+    text: filters.sz === key ? `\u2705 ${label}` : `\u2B1C ${label}`,
+    callback_data: `f:${id}:sz:${key}`,
+  }));
+
   return {
     inline_keyboard: [
       [
         { text: condNovoLabel, callback_data: `f:${id}:cond:novo` },
         { text: condUsadoLabel, callback_data: `f:${id}:cond:usado` },
       ],
+      sizeButtons,
       [
         { text: sortALabel, callback_data: `f:${id}:sort:a` },
         { text: sortDLabel, callback_data: `f:${id}:sort:d` },
@@ -137,6 +156,11 @@ function applyFilterToggle(filters, filterType, filterValue) {
       if (!updated.sort) delete updated.sort;
       break;
     }
+    case 'sz': {
+      updated.sz = updated.sz === filterValue ? undefined : filterValue;
+      if (!updated.sz) delete updated.sz;
+      break;
+    }
     case 'ship':
       updated.ship = !updated.ship;
       if (!updated.ship) delete updated.ship;
@@ -150,6 +174,7 @@ function formatFiltersSummary(filters) {
   if (!filters || Object.keys(filters).length === 0) return '';
   const parts = [];
   if (filters.cond) parts.push(filters.cond);
+  if (filters.sz && ML_SIZE_LABELS[filters.sz]) parts.push(`tam. ${ML_SIZE_LABELS[filters.sz]}`);
   if (filters.sort === 'price_asc') parts.push('menor preco');
   if (filters.sort === 'price_desc') parts.push('maior preco');
   if (filters.ship) parts.push('frete gratis');

@@ -2,14 +2,17 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DATA_DIR, 'bot.db');
+const DEFAULT_DATA_DIR = path.join(__dirname, '..', 'data');
+const DEFAULT_DB_PATH = path.join(DEFAULT_DATA_DIR, 'bot.db');
 
 let db;
+let activeDbPath = DEFAULT_DB_PATH;
 
-function init() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  db = new Database(DB_PATH);
+function init(customDbPath) {
+  activeDbPath = customDbPath || DEFAULT_DB_PATH;
+  const dir = path.dirname(activeDbPath);
+  fs.mkdirSync(dir, { recursive: true });
+  db = new Database(activeDbPath);
   db.pragma('journal_mode = WAL');
 
   db.exec(`
@@ -199,9 +202,9 @@ function purgeOldProducts(days) {
   return result.changes;
 }
 
-function backupDb() {
-  const backupPath = DB_PATH + '.bak';
-  db.backup(backupPath);
+async function backupDb() {
+  const backupPath = activeDbPath + '.bak';
+  await db.backup(backupPath);
   return backupPath;
 }
 
@@ -220,13 +223,8 @@ function getDb() {
 
 function blockSeller(chatId, seller) {
   const normalized = seller.toLowerCase().trim();
-  try {
-    db.prepare('INSERT OR IGNORE INTO blocked_sellers (chat_id, seller) VALUES (?, ?)').run(chatId, normalized);
-    return true;
-  } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return false;
-    throw err;
-  }
+  const result = db.prepare('INSERT OR IGNORE INTO blocked_sellers (chat_id, seller) VALUES (?, ?)').run(chatId, normalized);
+  return result.changes > 0;
 }
 
 function unblockSeller(chatId, seller) {

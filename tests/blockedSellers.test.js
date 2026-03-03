@@ -2,11 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../src/db');
 
-const TEST_DB = path.join(__dirname, '..', 'data', 'test.db');
+const TEST_DB = path.join(__dirname, '..', 'data', 'test_blocked.db');
 
 beforeAll(() => {
   process.env.NODE_ENV = 'test';
-  db.init();
+  db.init(TEST_DB);
 });
 
 afterAll(() => {
@@ -25,9 +25,9 @@ describe('blockSeller', () => {
     expect(db.blockSeller('user1', 'vendedor1')).toBe(true);
   });
 
-  test('bloquear vendedor duplicado retorna true (INSERT OR IGNORE)', () => {
+  test('bloquear vendedor duplicado retorna false', () => {
     db.blockSeller('user1', 'vendedor1');
-    expect(db.blockSeller('user1', 'vendedor1')).toBe(true);
+    expect(db.blockSeller('user1', 'vendedor1')).toBe(false);
   });
 
   test('normaliza para minusculo', () => {

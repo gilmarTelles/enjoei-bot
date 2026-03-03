@@ -2,6 +2,11 @@ const TelegramBot = require('node-telegram-bot-api');
 
 let bot;
 
+function escapeMd(text) {
+  if (!text) return '';
+  return String(text).replace(/([_*`\[\]])/g, '\\$1');
+}
+
 function init(token) {
   bot = new TelegramBot(token, { polling: true });
   console.log('[telegram] Bot iniciado');
@@ -30,4 +35,4 @@ function getBot() {
   return bot;
 }
 
-module.exports = { init, sendMessage, sendPhoto, getBot };
+module.exports = { init, sendMessage, sendPhoto, getBot, escapeMd };

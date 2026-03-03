@@ -2,11 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../src/db');
 
-const TEST_DB = path.join(__dirname, '..', 'data', 'test.db');
+const TEST_DB = path.join(__dirname, '..', 'data', 'test_db.db');
 
 beforeAll(() => {
   process.env.NODE_ENV = 'test';
-  db.init();
+  db.init(TEST_DB);
 });
 
 afterAll(() => {
@@ -20,6 +20,7 @@ beforeEach(() => {
   instance.exec('DELETE FROM keywords');
   instance.exec('DELETE FROM seen_products');
   instance.exec('DELETE FROM user_settings');
+  instance.exec('DELETE FROM blocked_sellers');
 });
 
 describe('Keywords', () => {
