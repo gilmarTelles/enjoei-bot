@@ -62,15 +62,11 @@ beforeEach(() => {
   instance.exec('DELETE FROM keywords');
   instance.exec('DELETE FROM seen_products');
   instance.exec('DELETE FROM user_settings');
-  instance.exec('DELETE FROM blocked_sellers');
   telegram.sendMessage.mockClear();
 });
 
 const commands = require('../src/commands');
 
-afterEach(() => {
-  commands.pendingKeywords.clear();
-});
 
 describe('Commands', () => {
   const ALLOWED = '6397962194';
@@ -111,41 +107,38 @@ describe('Commands', () => {
     expect(msg).toContain('Uso:');
   });
 
-  test('/adicionar com palavra mostra teclado de plataforma', async () => {
+  test('/adicionar com palavra adiciona diretamente', async () => {
     const bot = createMockBot();
     commands.register(bot);
     await bot.simulate(ALLOWED, '/adicionar ceni');
-    expect(bot.sendMessage).toHaveBeenCalled();
-    const call = bot.sendMessage.mock.calls[0];
-    expect(call[1]).toContain('Escolha a plataforma');
-    expect(call[1]).toContain('ceni');
-    const keyboard = call[2].reply_markup.inline_keyboard;
-    expect(keyboard[0][0].text).toBe('Enjoei');
-    expect(keyboard[0][0].callback_data).toBe('ap:enjoei');
-    expect(keyboard[0][1].text).toBe('Mercado Livre');
-    expect(keyboard[0][1].callback_data).toBe('ap:ml');
-    expect(keyboard[1][0].text).toBe('Ambos');
-    expect(keyboard[1][0].callback_data).toBe('ap:both');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('adicionada');
+    expect(msg).toContain('ceni');
+    const keywords = db.listKeywords(ALLOWED);
+    expect(keywords).toHaveLength(1);
+    expect(keywords[0].keyword).toBe('ceni');
+    expect(keywords[0].platform).toBe('enjoei');
   });
 
-  test('/adicionar armazena keyword pendente', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulate(ALLOWED, '/adicionar ceni');
-    const pending = commands.pendingKeywords.get(ALLOWED);
-    expect(pending).toBeDefined();
-    expect(pending.keyword).toBe('ceni');
-    expect(pending.maxPrice).toBeNull();
-  });
-
-  test('/adicionar com filtro de preco armazena pendente com preco', async () => {
+  test('/adicionar com filtro de preco adiciona com preco', async () => {
     const bot = createMockBot();
     commands.register(bot);
     await bot.simulate(ALLOWED, '/adicionar nike < 200');
-    const pending = commands.pendingKeywords.get(ALLOWED);
-    expect(pending).toBeDefined();
-    expect(pending.keyword).toBe('nike');
-    expect(pending.maxPrice).toBe(200);
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('adicionada');
+    expect(msg).toContain('nike');
+    expect(msg).toContain('max R$');
+    const keywords = db.listKeywords(ALLOWED);
+    expect(keywords[0].max_price).toBe(200);
+  });
+
+  test('/adicionar duplicada avisa', async () => {
+    db.addKeyword(ALLOWED, 'ceni');
+    const bot = createMockBot();
+    commands.register(bot);
+    await bot.simulate(ALLOWED, '/adicionar ceni');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('ja existe');
   });
 
   test('/remover sem argumento mostra uso', async () => {
@@ -410,76 +403,6 @@ describe('callback_query handler', () => {
     commands.register(bot);
     await bot.simulateCallback(BLOCKED, 'f:1:used:t');
     expect(bot.answerCallbackQuery).toHaveBeenCalledWith('query-123', { text: 'Acesso negado.' });
-  });
-
-  test('ap:enjoei adiciona keyword no Enjoei', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    commands.pendingKeywords.set(ALLOWED, { keyword: 'nike', maxPrice: null });
-    await bot.simulateCallback(ALLOWED, 'ap:enjoei');
-    const keywords = db.listKeywords(ALLOWED);
-    expect(keywords).toHaveLength(1);
-    expect(keywords[0].keyword).toBe('nike');
-    expect(keywords[0].platform).toBe('enjoei');
-    expect(bot.editMessageText).toHaveBeenCalled();
-    const msg = bot.editMessageText.mock.calls[0][0];
-    expect(msg).toContain('adicionada');
-    expect(msg).toContain('Enjoei');
-  });
-
-  test('ap:ml adiciona keyword no Mercado Livre', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    commands.pendingKeywords.set(ALLOWED, { keyword: 'nike', maxPrice: null });
-    await bot.simulateCallback(ALLOWED, 'ap:ml');
-    const keywords = db.listKeywords(ALLOWED);
-    expect(keywords).toHaveLength(1);
-    expect(keywords[0].platform).toBe('ml');
-    expect(bot.editMessageText.mock.calls[0][0]).toContain('Mercado Livre');
-  });
-
-  test('ap:both adiciona keyword em ambas plataformas', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    commands.pendingKeywords.set(ALLOWED, { keyword: 'nike', maxPrice: 200 });
-    await bot.simulateCallback(ALLOWED, 'ap:both');
-    const keywords = db.listKeywords(ALLOWED);
-    expect(keywords).toHaveLength(2);
-    const platforms = keywords.map(k => k.platform).sort();
-    expect(platforms).toEqual(['enjoei', 'ml']);
-    const msg = bot.editMessageText.mock.calls[0][0];
-    expect(msg).toContain('adicionada');
-    expect(msg).toContain('Enjoei');
-    expect(msg).toContain('Mercado Livre');
-    expect(msg).toContain('max R$');
-    expect(msg).toContain('200');
-  });
-
-  test('ap: sem keyword pendente mostra sessao expirada', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulateCallback(ALLOWED, 'ap:enjoei');
-    expect(bot.answerCallbackQuery).toHaveBeenCalledWith('query-123', { text: 'Sessao expirada. Use /adicionar novamente.' });
-  });
-
-  test('ap: limpa keyword pendente apos uso', async () => {
-    const bot = createMockBot();
-    commands.register(bot);
-    commands.pendingKeywords.set(ALLOWED, { keyword: 'nike', maxPrice: null });
-    await bot.simulateCallback(ALLOWED, 'ap:enjoei');
-    expect(commands.pendingKeywords.has(ALLOWED)).toBe(false);
-  });
-
-  test('ap:both com duplicata parcial mostra ambas mensagens', async () => {
-    db.addKeyword(ALLOWED, 'nike', null, 'enjoei');
-    const bot = createMockBot();
-    commands.register(bot);
-    commands.pendingKeywords.set(ALLOWED, { keyword: 'nike', maxPrice: null });
-    await bot.simulateCallback(ALLOWED, 'ap:both');
-    const msg = bot.editMessageText.mock.calls[0][0];
-    expect(msg).toContain('Mercado Livre');
-    expect(msg).toContain('ja existe');
-    expect(msg).toContain('Enjoei');
   });
 
   test('fs: seleciona keyword e mostra filtros com plataforma', async () => {

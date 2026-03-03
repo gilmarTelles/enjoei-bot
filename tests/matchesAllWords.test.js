@@ -22,11 +22,6 @@ jest.mock('../src/commands', () => ({
   setStatusData: jest.fn(),
   parsePrice: jest.fn(),
 }));
-jest.mock('../src/scraper', () => ({
-  launchBrowser: jest.fn(),
-  closeBrowser: jest.fn(),
-  searchProducts: jest.fn(),
-}));
 jest.mock('../src/notifier', () => ({ notifyNewProducts: jest.fn() }));
 jest.mock('../src/relevanceFilter', () => ({ filterByRelevance: jest.fn(p => p) }));
 jest.mock('node-cron', () => ({ schedule: jest.fn() }));

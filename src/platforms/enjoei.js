@@ -26,94 +26,14 @@ function buildSearchUrl(keyword, filters) {
   return `https://www.enjoei.com.br/${slug}/s?${params.toString()}`;
 }
 
-async function scrapePage(browser, keyword, filters) {
-  const page = await browser.newPage();
+const { fetchProducts } = require('../enjoeiApi');
 
-  try {
-    await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-    );
-    await page.setViewport({ width: 1280, height: 900 });
+async function searchProducts(keyword, filters) {
+  return fetchProducts(keyword, filters);
+}
 
-    const url = buildSearchUrl(keyword, filters);
-    await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 60000,
-    });
-
-    // Wait for product cards to render
-    await page.waitForSelector('.c-product-card', { timeout: 15000 }).catch(() => null);
-
-    // Small delay for any lazy-loaded content
-    await new Promise(r => setTimeout(r, 2000));
-
-    const products = await page.evaluate(() => {
-      const results = [];
-      const cards = document.querySelectorAll('.c-product-card');
-
-      // Featured store sections appear as nested <section> elements inside the
-      // main <section>. Their cards are not real search results, so exclude them.
-      const featuredCards = new Set(
-        [...document.querySelectorAll('main > section section .c-product-card')]
-      );
-
-      for (const card of cards) {
-        if (featuredCards.has(card)) continue;
-        const linkEl = card.querySelector('a[href*="/p/"]');
-        if (!linkEl) continue;
-
-        const href = linkEl.getAttribute('href') || '';
-        const match = href.match(/\/p\/(.+?)(?:\?|$)/);
-        if (!match) continue;
-
-        const productSlug = match[1];
-
-        // Title from h2 or data-test attribute
-        const titleEl = card.querySelector('[data-test="div-nome-prod"], h2.c-product-card__title');
-        const title = titleEl ? titleEl.textContent.trim() : productSlug;
-
-        // Price: get the current price (first non-discount span inside price container)
-        const priceContainer = card.querySelector('[data-test="div-preco"], .c-product-card__price');
-        let price = '';
-        if (priceContainer) {
-          const spans = priceContainer.querySelectorAll('span');
-          for (const span of spans) {
-            if (!span.classList.contains('c-product-card__price-discount') && !span.classList.contains('c-product-card__price')) {
-              const text = span.textContent.trim();
-              if (text.match(/R\$\s*[\d.,]+/)) {
-                price = text;
-                break;
-              }
-            }
-          }
-          if (!price) {
-            const priceMatch = priceContainer.textContent.match(/R\$\s*[\d.,]+/);
-            if (priceMatch) price = priceMatch[0];
-          }
-        }
-
-        // Product image
-        const imgEl = card.querySelector('img.c-product-card__img');
-        const image = imgEl ? imgEl.getAttribute('src') : '';
-
-        // Seller name
-        const sellerEl = card.querySelector('.l-store-info__seller-title');
-        const seller = sellerEl ? sellerEl.textContent.trim() : '';
-
-        // Clean the URL (remove tracking params)
-        const cleanHref = href.split('?')[0];
-        const url = `https://www.enjoei.com.br${cleanHref}`;
-
-        results.push({ id: productSlug, title, price, url, image, seller });
-      }
-
-      return results;
-    });
-
-    return products;
-  } finally {
-    await page.close().catch(() => {});
-  }
+async function searchProductsSince(keyword, filters, sinceTimestamp) {
+  return fetchProducts(keyword, filters, sinceTimestamp);
 }
 
 function parseFilters(filtersStr) {
@@ -244,7 +164,8 @@ module.exports = {
   platformKey,
   platformName,
   buildSearchUrl,
-  scrapePage,
+  searchProducts,
+  searchProductsSince,
   buildFilterKeyboard,
   applyFilterToggle,
   formatFiltersSummary,

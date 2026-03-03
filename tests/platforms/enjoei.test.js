@@ -1,4 +1,126 @@
 const enjoei = require('../../src/platforms/enjoei');
+const { normalizeProduct, buildSearchParams } = require('../../src/enjoeiApi');
+
+describe('enjoeiApi.normalizeProduct', () => {
+  test('normalizes a standard API node', () => {
+    const node = {
+      title: 'Nike Air Max 90',
+      price: 150.0,
+      path: 'nike-air-max-90-abc123',
+      photo: { url: 'https://img.enjoei.com.br/photo.jpg' },
+      user: { name: 'joao' },
+    };
+    const product = normalizeProduct(node);
+    expect(product.id).toBe('nike-air-max-90-abc123');
+    expect(product.title).toBe('Nike Air Max 90');
+    expect(product.price).toBe('R$ 150,00');
+    expect(product.url).toBe('https://www.enjoei.com.br/p/nike-air-max-90-abc123');
+    expect(product.image).toBe('https://img.enjoei.com.br/photo.jpg');
+    expect(product.seller).toBe('joao');
+  });
+
+  test('handles title as object with name', () => {
+    const node = { title: { name: 'Adidas Superstar' }, price: 99, slug: 'adidas-123' };
+    const product = normalizeProduct(node);
+    expect(product.title).toBe('Adidas Superstar');
+  });
+
+  test('handles missing optional fields', () => {
+    const node = { id: '12345', title: 'Test', price: 50 };
+    const product = normalizeProduct(node);
+    expect(product.id).toBe('12345');
+    expect(product.image).toBe('');
+    expect(product.seller).toBe('');
+  });
+
+  test('handles photos array', () => {
+    const node = { title: 'Test', price: 10, slug: 'test', photos: [{ url: 'https://img.enjoei.com.br/a.jpg' }] };
+    const product = normalizeProduct(node);
+    expect(product.image).toBe('https://img.enjoei.com.br/a.jpg');
+  });
+});
+
+describe('enjoeiApi.buildSearchParams', () => {
+  test('includes required params', () => {
+    const params = buildSearchParams('nike', null, null);
+    expect(params.get('term')).toBe('nike');
+    expect(params.get('first')).toBe('30');
+    expect(params.get('operation_name')).toBe('searchProducts');
+    expect(params.get('browser_id')).toBeTruthy();
+    expect(params.get('search_id')).toBeTruthy();
+  });
+
+  test('includes sinceTimestamp as ISO', () => {
+    const ts = new Date('2026-01-01T00:00:00Z').getTime();
+    const params = buildSearchParams('nike', null, ts);
+    expect(params.get('last_published_at')).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  test('maps filters correctly', () => {
+    const params = buildSearchParams('nike', { used: true, sr: 'near_regions', dep: 'masculino', sz: 'g', sort: 'price_asc' }, null);
+    expect(params.get('used')).toBe('true');
+    expect(params.get('shipping_range')).toBe('near_regions');
+    expect(params.get('department')).toBe('masculino');
+    expect(params.get('size')).toBe('g');
+    expect(params.get('sort')).toBe('price_asc');
+  });
+});
+
+describe('enjoei.searchProducts', () => {
+  const mockApiResponse = {
+    data: {
+      search: {
+        products: {
+          edges: [
+            { node: { title: 'Nike Air', price: 100, path: 'nike-air-1', photo: { url: 'https://img.enjoei.com.br/1.jpg' }, user: { name: 'seller1' } } },
+            { node: { title: 'Nike Dunk', price: 200, path: 'nike-dunk-2', photo: { url: 'https://img.enjoei.com.br/2.jpg' }, user: { name: 'seller2' } } },
+          ],
+        },
+      },
+    },
+  };
+
+  beforeEach(() => {
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(mockApiResponse),
+      })
+    );
+  });
+
+  afterEach(() => {
+    delete global.fetch;
+  });
+
+  test('returns normalized products from API', async () => {
+    const products = await enjoei.searchProducts('nike', null);
+    expect(products).toHaveLength(2);
+    expect(products[0].title).toBe('Nike Air');
+    expect(products[0].url).toContain('/p/nike-air-1');
+    expect(products[1].title).toBe('Nike Dunk');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const calledUrl = global.fetch.mock.calls[0][0];
+    expect(calledUrl).toContain('enjusearch.enjoei.com.br');
+    expect(calledUrl).toContain('term=nike');
+  });
+
+  test('searchProductsSince passes sinceTimestamp', async () => {
+    const ts = Date.now() - 3600000;
+    await enjoei.searchProductsSince('nike', null, ts);
+    const calledUrl = global.fetch.mock.calls[0][0];
+    expect(calledUrl).toContain('last_published_at=');
+  });
+
+  test('returns empty array on API error', async () => {
+    global.fetch = jest.fn(() =>
+      Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve('error') })
+    );
+    const products = await enjoei.searchProducts('nike', null);
+    expect(products).toEqual([]);
+  });
+});
 
 describe('enjoei.buildSearchUrl', () => {
   test('URL basica sem filtros - slug no path e lp=24h por padrao', () => {
@@ -214,5 +336,10 @@ describe('enjoei module exports', () => {
 
   test('platformName is Enjoei', () => {
     expect(enjoei.platformName).toBe('Enjoei');
+  });
+
+  test('exports searchProducts and searchProductsSince', () => {
+    expect(typeof enjoei.searchProducts).toBe('function');
+    expect(typeof enjoei.searchProductsSince).toBe('function');
   });
 });

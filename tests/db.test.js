@@ -20,7 +20,7 @@ beforeEach(() => {
   instance.exec('DELETE FROM keywords');
   instance.exec('DELETE FROM seen_products');
   instance.exec('DELETE FROM user_settings');
-  instance.exec('DELETE FROM blocked_sellers');
+
 });
 
 describe('Keywords', () => {

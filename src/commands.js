@@ -20,9 +20,6 @@ function isAllowedChat(chatId) {
 let checkCallback = null;
 let statusData = null;
 
-// Temporary storage for /adicionar -> platform selection flow
-// Map<chatId, { keyword, maxPrice }>
-const pendingKeywords = new Map();
 
 function setCheckCallback(cb) {
   checkCallback = cb;
@@ -191,21 +188,16 @@ function register(bot) {
             await sendMessage(chatId, `Palavra-chave muito longa (maximo ${KEYWORD_MAX_LEN} caracteres).`);
             return;
           }
-          // Store pending keyword and show platform selection keyboard
-          pendingKeywords.set(chatId, { keyword, maxPrice });
-          await bot.sendMessage(chatId, `Escolha a plataforma para "${keyword.toLowerCase()}":`, {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: 'Enjoei', callback_data: 'ap:enjoei' },
-                  { text: 'Mercado Livre', callback_data: 'ap:ml' },
-                ],
-                [
-                  { text: 'Ambos', callback_data: 'ap:both' },
-                ],
-              ],
-            },
-          });
+          // Add keyword directly to Enjoei (single active platform)
+          const added = db.addKeyword(chatId, keyword, maxPrice, 'enjoei');
+          if (added) {
+            let confirmMsg = `Palavra-chave adicionada: "${keyword.toLowerCase()}"`;
+            if (maxPrice) confirmMsg += ` (max R$ ${maxPrice.toFixed(2).replace('.', ',')})`;
+            confirmMsg += '\nUse /filtros para configurar filtros de busca.';
+            await sendMessage(chatId, confirmMsg);
+          } else {
+            await sendMessage(chatId, `Palavra-chave "${keyword.toLowerCase()}" ja existe.`);
+          }
           break;
         }
 
@@ -325,47 +317,6 @@ function register(bot) {
           break;
         }
 
-        case '/bloquear': {
-          if (!arg) {
-            await sendMessage(chatId, 'Uso: /bloquear <vendedor>\nExemplo: /bloquear nomeusuario');
-            return;
-          }
-          const seller = arg.toLowerCase().trim();
-          const blocked = db.blockSeller(chatId, seller);
-          if (blocked) {
-            await sendMessage(chatId, `Vendedor "${seller}" bloqueado. Produtos desse vendedor nao serao mais exibidos.`);
-          } else {
-            await sendMessage(chatId, `Vendedor "${seller}" ja esta bloqueado.`);
-          }
-          break;
-        }
-
-        case '/desbloquear': {
-          if (!arg) {
-            await sendMessage(chatId, 'Uso: /desbloquear <vendedor>\nExemplo: /desbloquear nomeusuario');
-            return;
-          }
-          const seller = arg.toLowerCase().trim();
-          const unblocked = db.unblockSeller(chatId, seller);
-          if (unblocked) {
-            await sendMessage(chatId, `Vendedor "${seller}" desbloqueado.`);
-          } else {
-            await sendMessage(chatId, `Vendedor "${seller}" nao estava bloqueado.`);
-          }
-          break;
-        }
-
-        case '/bloqueados': {
-          const blockedSellers = db.listBlockedSellers(chatId);
-          if (blockedSellers.length === 0) {
-            await sendMessage(chatId, 'Nenhum vendedor bloqueado.');
-          } else {
-            const list = blockedSellers.map((s, i) => `${i + 1}. ${s}`).join('\n');
-            await sendMessage(chatId, `*Vendedores bloqueados:*\n\n${list}`);
-          }
-          break;
-        }
-
         case '/ajuda':
         case '/start':
         case '/help': {
@@ -380,9 +331,6 @@ function register(bot) {
             '/buscar — Buscar agora',
             '/parar — Pausar notificacoes',
             '/retomar — Retomar notificacoes',
-            '/bloquear <vendedor> — Bloquear vendedor',
-            '/desbloquear <vendedor> — Desbloquear vendedor',
-            '/bloqueados — Ver vendedores bloqueados',
             '/status — Status da ultima verificacao',
             '/ajuda — Mostrar esta mensagem',
           ].join('\n'));
@@ -411,51 +359,6 @@ function register(bot) {
     }
 
     try {
-      // Add pending keyword to platform: ap:<platform>
-      if (data.startsWith('ap:')) {
-        const platformChoice = data.substring(3);
-        const pending = pendingKeywords.get(chatId);
-        if (!pending) {
-          await bot.answerCallbackQuery(query.id, { text: 'Sessao expirada. Use /adicionar novamente.' });
-          return;
-        }
-        pendingKeywords.delete(chatId);
-
-        const platformsToAdd = platformChoice === 'both'
-          ? ['enjoei', 'ml']
-          : [platformChoice];
-
-        const results = [];
-        for (const platform of platformsToAdd) {
-          const added = db.addKeyword(chatId, pending.keyword, pending.maxPrice, platform);
-          const label = getPlatform(platform).platformName;
-          results.push({ platform: label, added });
-        }
-
-        const addedResults = results.filter(r => r.added);
-        const duplicateResults = results.filter(r => !r.added);
-
-        let confirmMsg = '';
-        if (addedResults.length > 0) {
-          const labels = addedResults.map(r => r.platform).join(' e ');
-          confirmMsg = `Palavra-chave adicionada: "${pending.keyword.toLowerCase()}" (${labels})`;
-          if (pending.maxPrice) confirmMsg += ` (max R$ ${pending.maxPrice.toFixed(2).replace('.', ',')})`;
-          confirmMsg += '\nUse /filtros para configurar filtros de busca.';
-        }
-        if (duplicateResults.length > 0) {
-          const labels = duplicateResults.map(r => r.platform).join(' e ');
-          if (confirmMsg) confirmMsg += '\n';
-          confirmMsg += `Palavra-chave "${pending.keyword.toLowerCase()}" ja existe no ${labels}.`;
-        }
-
-        await bot.editMessageText(confirmMsg, {
-          chat_id: chatId,
-          message_id: messageId,
-        });
-        await bot.answerCallbackQuery(query.id);
-        return;
-      }
-
       // Keyword selector: fs:<id>
       if (data.startsWith('fs:')) {
         const kwId = parseInt(data.split(':')[1], 10);
@@ -473,14 +376,6 @@ function register(bot) {
           reply_markup: keyboard,
         });
         await bot.answerCallbackQuery(query.id);
-        return;
-      }
-
-      // Block seller: bs:<seller>
-      if (data.startsWith('bs:')) {
-        const seller = data.substring(3);
-        db.blockSeller(chatId, seller);
-        await bot.answerCallbackQuery(query.id, { text: `Vendedor "${seller}" bloqueado!` });
         return;
       }
 
@@ -526,4 +421,4 @@ function register(bot) {
   });
 }
 
-module.exports = { register, setCheckCallback, setStatusData, parsePrice, parseFilters, formatFiltersSummary, buildFilterKeyboard, sanitizeKeyword, pendingKeywords };
+module.exports = { register, setCheckCallback, setStatusData, parsePrice, parseFilters, formatFiltersSummary, buildFilterKeyboard, sanitizeKeyword };

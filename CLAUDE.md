@@ -63,17 +63,18 @@ The bot uses a plugin-based architecture for marketplace platforms:
 
 - **Platform Registry** (`src/platforms/index.js`): Central registry mapping platform keys to their modules
 - **Platform Modules** (`src/platforms/`): Each platform (enjoei, mercadolivre, olx) implements:
-  - `scrapePage(browser, keyword, filters)`: Search results scraping
+  - `searchProducts(keyword, filters)`: Search for products via API
+  - `searchProductsSince(keyword, filters, sinceTimestamp)`: Search with time window (for sweep)
   - `buildSearchUrl(keyword, filters)`: URL construction with filters
   - `platformName`: Human-readable platform name
 
 ### Core Components
 
 1. **Main Orchestrator** (`src/index.js`)
-   - Initializes database, browser, Telegram bot
-   - Schedules two cron jobs:
-     - Keyword search checks (every N minutes, configured via CHECK_INTERVAL)
-     - Daily maintenance: purge old products + backup DB (4 AM)
+   - Initializes database, Telegram bot
+   - Runs history sweep at startup (marks past 24h products as seen)
+   - Starts continuous polling loop (every 2s by default, configurable via POLL_INTERVAL_MS)
+   - Daily maintenance cron: purge old products + backup DB (4 AM)
    - Handles graceful shutdown (SIGINT/SIGTERM)
 
 2. **Database Layer** (`src/db.js`)
@@ -82,11 +83,12 @@ The bot uses a plugin-based architecture for marketplace platforms:
    - Schema migrations handled in `init()` using try/catch around ALTER TABLE
    - Multi-platform support: UNIQUE constraints include platform column
 
-3. **Scraper** (`src/scraper.js`)
-   - Puppeteer-based with automatic browser restart every 24 hours
-   - Retry mechanism: up to 3 attempts with exponential backoff
-   - Browser launch args optimized for server environments (--no-sandbox, --single-process)
-   - Delegates to platform-specific modules via `getPlatform()`
+3. **Enjoei API Client** (`src/enjoeiApi.js`)
+   - Direct HTTP calls to Enjoei's GraphQL search API (`enjusearch.enjoei.com.br/graphql-search-x`)
+   - Generates persistent browser_id (saved to `data/browser_id.txt`)
+   - Normalizes API responses to `{ id, title, price, url, image, seller }` format
+   - Retry up to 3x with backoff; handles Cloudflare blocks (403/503) and rate limits (429)
+   - Uses Node.js built-in `fetch` (Node 18+)
 
 4. **Command Handler** (`src/commands.js`)
    - Telegram bot commands: `/adicionar`, `/remover`, `/listar`, `/buscar`, `/ajuda`, etc.
@@ -105,19 +107,21 @@ The bot uses a plugin-based architecture for marketplace platforms:
 ### Data Flow
 
 1. User adds keyword via `/adicionar` → stored in `keywords` table with optional filters and platform
-2. Cron triggers `runCheck()` → groups keywords by platform+keyword+filters to avoid duplicate scrapes
-3. For each group:
-   - `scraper.searchProducts()` → delegates to platform module → returns products array
-   - Filter by user's `max_price` if set
+2. On startup: `runHistorySweep()` scans past 24h in 15-min windows, marks all found products as seen (no notifications)
+3. Polling loop calls `runCheck()` every 2s → groups keywords by platform+keyword+filters
+4. For each group:
+   - `platformModule.searchProducts(keyword, filters)` → returns products array via API
    - `filterByRelevance()` → AI filtering (if enabled)
+   - `matchesAllWords()` → exact keyword match
+   - Filter by user's `max_price` if set
    - Check `seen_products` table → identify new products
    - Send notifications via `notifyNewProducts()`
 
 ### Key Patterns
 
 - **Platform Isolation**: Errors in one platform don't crash checks for other platforms
-- **Stale Selector Detection**: If all scrapes return empty results N times consecutively, admin is notified (potential CSS selector breakage)
-- **Rate Limiting**: 3-second delay between scrapes to avoid overwhelming target sites
+- **Stale API Detection**: If all searches return empty results N times consecutively, admin is notified (potential API change or Cloudflare block)
+- **Rate Limiting**: 500ms delay between API calls
 - **Database Migrations**: Non-destructive migrations using `ALTER TABLE` with try/catch
 - **Graceful Degradation**: AI relevance filter fails silently and returns all products
 
@@ -126,7 +130,6 @@ The bot uses a plugin-based architecture for marketplace platforms:
 Required in `.env`:
 ```
 TELEGRAM_BOT_TOKEN=your_token_here
-CHECK_INTERVAL=5  # Minutes between keyword checks
 ALLOWED_USERS=chat_id1,chat_id2  # Comma-separated Telegram chat IDs
 ```
 
@@ -135,7 +138,8 @@ Optional:
 ADMIN_CHAT_ID=your_chat_id  # For error notifications
 ANTHROPIC_API_KEY=your_key  # For AI relevance filtering
 ENABLE_RELEVANCE_FILTER=true  # Enable AI filtering
-PUPPETEER_EXECUTABLE_PATH=/path/to/chromium  # Custom browser path
+POLL_INTERVAL_MS=2000  # Milliseconds between polling cycles (default: 2000)
+SWEEP_HOURS=24  # Hours of history to sweep on startup (default: 24)
 SSH_SERVER=user@host  # Production server SSH
 SSH_PROJECT_DIR=~/enjoei-bot  # Project path on server
 ```
@@ -161,7 +165,8 @@ The bot builds search URLs matching Enjoei's real format:
    module.exports = {
      platformName: 'Platform Name',
      buildSearchUrl: (keyword, filters) => { /* return URL */ },
-     scrapePage: async (browser, keyword, filters) => { /* return products array */ },
+     searchProducts: async (keyword, filters) => { /* return products array */ },
+     searchProductsSince: async (keyword, filters, sinceTimestamp) => { /* return products array */ },
    };
    ```
 
@@ -184,6 +189,6 @@ The bot builds search URLs matching Enjoei's real format:
 ## Testing Notes
 
 - Tests use Jest
-- Mock Puppeteer browser and Telegram bot in tests
+- Mock Telegram bot and `global.fetch` in tests
 - Database tests create temporary in-memory DB
-- Platform scraper tests should mock network requests to avoid hitting live sites
+- Platform API tests mock `fetch` to avoid hitting live endpoints
