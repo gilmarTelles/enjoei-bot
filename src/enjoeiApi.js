@@ -58,7 +58,8 @@ function buildSearchParams(term, filters, sinceTimestamp) {
   params.set('experienced_seller', 'true');
 
   if (sinceTimestamp) {
-    const iso = new Date(sinceTimestamp).toISOString();
+    // API expects Go-style time format without milliseconds
+    const iso = new Date(sinceTimestamp).toISOString().replace(/\.\d{3}Z$/, 'Z');
     params.set('last_published_at', iso);
   }
 
@@ -82,10 +83,10 @@ function normalizeProduct(node) {
 
   let price = '';
   if (node.price != null) {
-    const priceNum = typeof node.price === 'object' ? (node.price.listed || node.price.current || 0) : node.price;
-    const cents = typeof priceNum === 'number' ? priceNum : parseFloat(priceNum) || 0;
-    // API returns price in cents (integer) or reais (float) — detect by magnitude
-    const reais = cents >= 10000 ? cents / 100 : cents;
+    const priceNum = typeof node.price === 'object'
+      ? (node.price.current || node.price.original || 0)
+      : node.price;
+    const reais = typeof priceNum === 'number' ? priceNum : parseFloat(priceNum) || 0;
     price = `R$ ${reais.toFixed(2).replace('.', ',')}`;
   }
 
@@ -93,10 +94,11 @@ function normalizeProduct(node) {
   const url = slug ? `https://www.enjoei.com.br/p/${slug}` : '';
 
   let image = '';
-  if (node.photo && node.photo.url) {
+  const publicId = node.photo?.image_public_id;
+  if (publicId) {
+    image = `https://photos.enjoei.com.br/${publicId}/828xN/${publicId}.jpg`;
+  } else if (node.photo?.url) {
     image = node.photo.url;
-  } else if (node.photos && node.photos.length > 0) {
-    image = node.photos[0].url || '';
   }
 
   const seller = node.user
@@ -153,6 +155,13 @@ async function fetchProducts(term, filters, sinceTimestamp) {
       }
 
       const json = await response.json();
+
+      // Check for GraphQL errors
+      if (json.errors && json.errors.length > 0) {
+        console.warn(`[enjoeiApi] GraphQL error for "${term}": ${json.errors[0].message}`);
+        return [];
+      }
+
       const edges = json?.data?.search?.products?.edges;
       if (!Array.isArray(edges)) {
         console.warn(`[enjoeiApi] Unexpected response structure for "${term}"`);

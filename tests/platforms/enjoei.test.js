@@ -4,10 +4,10 @@ const { normalizeProduct, buildSearchParams } = require('../../src/enjoeiApi');
 describe('enjoeiApi.normalizeProduct', () => {
   test('normalizes a standard API node', () => {
     const node = {
-      title: 'Nike Air Max 90',
-      price: 150.0,
+      title: { name: 'Nike Air Max 90' },
+      price: { original: 200, current: 150 },
       path: 'nike-air-max-90-abc123',
-      photo: { url: 'https://img.enjoei.com.br/photo.jpg' },
+      photo: { image_public_id: 'abc123def' },
       user: { name: 'joao' },
     };
     const product = normalizeProduct(node);
@@ -15,12 +15,12 @@ describe('enjoeiApi.normalizeProduct', () => {
     expect(product.title).toBe('Nike Air Max 90');
     expect(product.price).toBe('R$ 150,00');
     expect(product.url).toBe('https://www.enjoei.com.br/p/nike-air-max-90-abc123');
-    expect(product.image).toBe('https://img.enjoei.com.br/photo.jpg');
+    expect(product.image).toBe('https://photos.enjoei.com.br/abc123def/828xN/abc123def.jpg');
     expect(product.seller).toBe('joao');
   });
 
   test('handles title as object with name', () => {
-    const node = { title: { name: 'Adidas Superstar' }, price: 99, slug: 'adidas-123' };
+    const node = { title: { name: 'Adidas Superstar' }, price: { current: 99 }, slug: 'adidas-123' };
     const product = normalizeProduct(node);
     expect(product.title).toBe('Adidas Superstar');
   });
@@ -33,8 +33,8 @@ describe('enjoeiApi.normalizeProduct', () => {
     expect(product.seller).toBe('');
   });
 
-  test('handles photos array', () => {
-    const node = { title: 'Test', price: 10, slug: 'test', photos: [{ url: 'https://img.enjoei.com.br/a.jpg' }] };
+  test('handles photo with url fallback', () => {
+    const node = { title: 'Test', price: 10, slug: 'test', photo: { url: 'https://img.enjoei.com.br/a.jpg' } };
     const product = normalizeProduct(node);
     expect(product.image).toBe('https://img.enjoei.com.br/a.jpg');
   });
@@ -53,7 +53,7 @@ describe('enjoeiApi.buildSearchParams', () => {
   test('includes sinceTimestamp as ISO', () => {
     const ts = new Date('2026-01-01T00:00:00Z').getTime();
     const params = buildSearchParams('nike', null, ts);
-    expect(params.get('last_published_at')).toBe('2026-01-01T00:00:00.000Z');
+    expect(params.get('last_published_at')).toBe('2026-01-01T00:00:00Z');
   });
 
   test('maps filters correctly', () => {
@@ -72,8 +72,8 @@ describe('enjoei.searchProducts', () => {
       search: {
         products: {
           edges: [
-            { node: { title: 'Nike Air', price: 100, path: 'nike-air-1', photo: { url: 'https://img.enjoei.com.br/1.jpg' }, user: { name: 'seller1' } } },
-            { node: { title: 'Nike Dunk', price: 200, path: 'nike-dunk-2', photo: { url: 'https://img.enjoei.com.br/2.jpg' }, user: { name: 'seller2' } } },
+            { node: { title: { name: 'Nike Air' }, price: { current: 100 }, path: 'nike-air-1', photo: { image_public_id: 'img1' }, user: { name: 'seller1' } } },
+            { node: { title: { name: 'Nike Dunk' }, price: { current: 200 }, path: 'nike-dunk-2', photo: { image_public_id: 'img2' }, user: { name: 'seller2' } } },
           ],
         },
       },
