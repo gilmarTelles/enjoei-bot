@@ -2,7 +2,6 @@ const db = require('./db');
 const { sendMessage } = require('./telegram');
 const { getPlatform, resolvePlatformAlias, DEFAULT_PLATFORM } = require('./platforms');
 
-const MAX_KEYWORDS = 10;
 const KEYWORD_MIN_LEN = 2;
 const KEYWORD_MAX_LEN = 50;
 
@@ -192,12 +191,6 @@ function register(bot) {
             await sendMessage(chatId, `Palavra-chave muito longa (maximo ${KEYWORD_MAX_LEN} caracteres).`);
             return;
           }
-          const count = db.countKeywords(chatId);
-          if (count >= MAX_KEYWORDS) {
-            await sendMessage(chatId, `Limite de ${MAX_KEYWORDS} palavras-chave atingido. Remova alguma com /remover.`);
-            return;
-          }
-
           // Store pending keyword and show platform selection keyboard
           pendingKeywords.set(chatId, { keyword, maxPrice });
           await bot.sendMessage(chatId, `Escolha a plataforma para "${keyword.toLowerCase()}":`, {

@@ -266,16 +266,6 @@ describe('Commands', () => {
     expect(telegram.sendMessage.mock.calls[0][1]).toContain('muito longa');
   });
 
-  test('/adicionar limite de palavras-chave', async () => {
-    for (let i = 1; i <= 10; i++) {
-      db.addKeyword(ALLOWED, `palavra${i}`);
-    }
-    const bot = createMockBot();
-    commands.register(bot);
-    await bot.simulate(ALLOWED, '/adicionar palavra11');
-    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Limite');
-  });
-
   test('/buscar com summary mostra resumo', async () => {
     const bot = createMockBot();
     commands.register(bot);
