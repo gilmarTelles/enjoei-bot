@@ -107,7 +107,7 @@ The bot uses a plugin-based architecture for marketplace platforms:
 ### Data Flow
 
 1. User adds keyword via `/adicionar` → stored in `keywords` table with optional filters and platform
-2. On startup: `runHistorySweep()` scans past 24h in 15-min windows, marks all found products as seen (no notifications)
+2. On startup: `runHistorySweep()` does a single search per keyword group, marks all found products as seen (no notifications)
 3. Polling loop calls `runCheck()` every 2s → groups keywords by platform+keyword+filters
 4. For each group:
    - `platformModule.searchProducts(keyword, filters)` → returns products array via API
@@ -139,7 +139,8 @@ ADMIN_CHAT_ID=your_chat_id  # For error notifications
 ANTHROPIC_API_KEY=your_key  # For AI relevance filtering
 ENABLE_RELEVANCE_FILTER=true  # Enable AI filtering
 POLL_INTERVAL_MS=2000  # Milliseconds between polling cycles (default: 2000)
-SWEEP_HOURS=24  # Hours of history to sweep on startup (default: 24)
+ENJOEI_CITY=sao-jose-dos-pinhais  # City for search relevance (default: sao-jose-dos-pinhais)
+ENJOEI_STATE=pr  # State for search relevance (default: pr)
 SSH_SERVER=user@host  # Production server SSH
 SSH_PROJECT_DIR=~/enjoei-bot  # Project path on server
 ```
