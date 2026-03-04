@@ -12,7 +12,6 @@ const { parsePrice } = commands;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 2000;
-const SWEEP_HOURS = parseInt(process.env.SWEEP_HOURS, 10) || 24;
 const PURGE_DAYS = 7;
 const STALE_THRESHOLD = 3;
 const API_DELAY_MS = 500;
@@ -105,7 +104,7 @@ function buildGroups(allUserKeywords) {
 
 async function processProducts(products, keyword, platform, users) {
   const platformModule = getPlatform(platform);
-  const platformLabel = platformModule ? platformModule.platformName : platform;
+  const platformLabel = (platformModule && platformModule.platformName) || platform;
 
   // AI relevance filter
   let aiFiltered = products;
@@ -186,6 +185,11 @@ async function runCheck() {
       const platformModule = getPlatform(platform);
       const platformLabel = platformModule ? platformModule.platformName : platform;
 
+      if (!platformModule) {
+        console.error(`[check] Plataforma desconhecida: "${platform}", pulando "${keyword}"`);
+        continue;
+      }
+
       try {
         const filtersLabel = filters ? ` (filtros: ${JSON.stringify(filters)})` : '';
         console.log(`[check] Buscando: "${keyword}" [${platformLabel}]${filtersLabel}`);
@@ -251,36 +255,30 @@ async function runHistorySweep() {
     return;
   }
 
-  const now = Date.now();
-  const sweepStart = now - SWEEP_HOURS * 60 * 60 * 1000;
-  const windowMs = 15 * 60 * 1000; // 15-minute windows
-
-  console.log(`[sweep] Varrendo ultimas ${SWEEP_HOURS}h para ${groups.length} grupo(s)...`);
+  console.log(`[sweep] Marcando produtos existentes para ${groups.length} grupo(s)...`);
 
   for (const { keyword, filters, platform, users } of groups) {
     const platformModule = getPlatform(platform);
-    if (!platformModule || !platformModule.searchProductsSince) continue;
+    if (!platformModule) continue;
 
     const platformLabel = platformModule.platformName;
     let totalSeen = 0;
 
-    for (let windowStart = sweepStart; windowStart < now; windowStart += windowMs) {
-      try {
-        const products = await platformModule.searchProductsSince(keyword, filters, windowStart);
+    try {
+      const products = await platformModule.searchProducts(keyword, filters);
 
-        for (const product of products) {
-          for (const { chatId } of users) {
-            if (!db.isProductSeen(product.id, keyword, chatId, platform)) {
-              db.markProductSeen(product, keyword, chatId, platform);
-              totalSeen++;
-            }
+      for (const product of products) {
+        for (const { chatId } of users) {
+          if (!db.isProductSeen(product.id, keyword, chatId, platform)) {
+            db.markProductSeen(product, keyword, chatId, platform);
+            totalSeen++;
           }
         }
-
-        await new Promise(r => setTimeout(r, API_DELAY_MS));
-      } catch (err) {
-        console.error(`[sweep] Erro em "${keyword}" [${platformLabel}] window ${new Date(windowStart).toISOString()}: ${err.message}`);
       }
+
+      await new Promise(r => setTimeout(r, API_DELAY_MS));
+    } catch (err) {
+      console.error(`[sweep] Erro em "${keyword}" [${platformLabel}]: ${err.message}`);
     }
 
     console.log(`[sweep] "${keyword}" [${platformLabel}]: ${totalSeen} produto(s) marcado(s) como visto(s)`);
