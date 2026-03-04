@@ -33,6 +33,18 @@ describe('enjoeiApi.normalizeProduct', () => {
     expect(product.seller).toBe('');
   });
 
+  test('uses path as id when both path and numeric id exist', () => {
+    const node = {
+      id: '137860269',
+      title: { name: 'Nike Air' },
+      price: { current: 100 },
+      path: 'nike-air-max-90-137860269',
+      photo: { image_public_id: 'img1' },
+    };
+    const product = normalizeProduct(node);
+    expect(product.id).toBe('nike-air-max-90-137860269');
+  });
+
   test('handles photo without image_public_id', () => {
     const node = { title: { name: 'Test' }, price: 10, path: 'test', photo: {} };
     const product = normalizeProduct(node);

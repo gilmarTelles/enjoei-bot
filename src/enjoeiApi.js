@@ -125,7 +125,7 @@ function normalizeProduct(node) {
   const seller = node.store?.displayable?.name || '';
 
   return {
-    id: String(node.id || slug || ''),
+    id: slug || String(node.id || ''),
     title,
     price,
     url,
