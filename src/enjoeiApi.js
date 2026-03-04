@@ -7,6 +7,10 @@ const QUERY_ID = 'c5faa5f85fb47bf0beaa97b67d8a9189';
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
 
+// Location defaults (Enjoei uses these for search relevance)
+const CITY = process.env.ENJOEI_CITY || 'sao-jose-dos-pinhais';
+const STATE = process.env.ENJOEI_STATE || 'pr';
+
 let browserId = null;
 
 function getBrowserId() {
@@ -46,40 +50,59 @@ function buildHeaders() {
   };
 }
 
+// Format a Date as Brazil timezone offset string: YYYY-MM-DDTHH:MM:SS-03:00
+function formatBrazilTimestamp(date) {
+  const utcMs = date.getTime();
+  const brMs = utcMs + (-3 * 60 * 60 * 1000); // UTC-3
+  const br = new Date(brMs);
+  const pad = n => String(n).padStart(2, '0');
+  return `${br.getUTCFullYear()}-${pad(br.getUTCMonth() + 1)}-${pad(br.getUTCDate())}T${pad(br.getUTCHours())}:${pad(br.getUTCMinutes())}:${pad(br.getUTCSeconds())}-03:00`;
+}
+
+// Convert lp filter value to a last_published_at timestamp
+const LP_OFFSETS = {
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '14d': 14 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+};
+
 function buildSearchParams(term, filters, sinceTimestamp) {
   const params = new URLSearchParams();
   params.set('browser_id', getBrowserId());
-  params.set('search_id', `${randomUUID()}-${Date.now()}`);
-  params.set('term', term);
+  params.set('city', CITY);
+  params.set('experienced_seller', 'true');
   params.set('first', '30');
+
+  // Time filter: explicit sinceTimestamp takes priority, then lp filter, default 24h
+  if (sinceTimestamp) {
+    params.set('last_published_at', formatBrazilTimestamp(new Date(sinceTimestamp)));
+  } else {
+    const lp = (filters && filters.lp) || '24h';
+    const offsetMs = LP_OFFSETS[lp] || LP_OFFSETS['24h'];
+    params.set('last_published_at', formatBrazilTimestamp(new Date(Date.now() - offsetMs)));
+  }
+
   params.set('operation_name', 'searchProducts');
   params.set('query_id', QUERY_ID);
-  params.set('search_context', 'products_search');
-  params.set('experienced_seller', 'true');
-
-  if (sinceTimestamp) {
-    // API expects Go-style time format without milliseconds
-    const iso = new Date(sinceTimestamp).toISOString().replace(/\.\d{3}Z$/, 'Z');
-    params.set('last_published_at', iso);
-  }
+  params.set('search_context', 'products_search_default');
+  params.set('search_id', `${randomUUID()}-${Date.now()}`);
 
   if (filters) {
+    if (filters.sr) params.set('shipping_range', filters.sr);
     if (filters.used) params.set('used', 'true');
-    if (filters.sr === 'near_regions') params.set('shipping_range', 'near_regions');
-    if (filters.sr === 'same_country') params.set('shipping_range', 'same_country');
     if (filters.dep) params.set('department', filters.dep);
     if (filters.sz) params.set('size', filters.sz);
-    // Note: sort filter is applied client-side; the API's sort param expects a
-    // GraphQL SortSearchInput type which is not supported via GET query strings.
   }
+
+  params.set('state', STATE);
+  params.set('term', term);
 
   return params;
 }
 
 function normalizeProduct(node) {
-  const title = typeof node.title === 'object' && node.title !== null
-    ? (node.title.name || '')
-    : (node.title || '');
+  const title = (node.title && node.title.name) || '';
 
   let price = '';
   if (node.price != null) {
@@ -90,23 +113,19 @@ function normalizeProduct(node) {
     price = `R$ ${reais.toFixed(2).replace('.', ',')}`;
   }
 
-  const slug = node.path || node.slug || node.id || '';
+  const slug = node.path || node.id || '';
   const url = slug ? `https://www.enjoei.com.br/p/${slug}` : '';
 
   let image = '';
   const publicId = node.photo?.image_public_id;
   if (publicId) {
     image = `https://photos.enjoei.com.br/${publicId}/828xN/${publicId}.jpg`;
-  } else if (node.photo?.url) {
-    image = node.photo.url;
   }
 
-  const seller = node.user
-    ? (node.user.name || node.user.username || '')
-    : '';
+  const seller = node.store?.displayable?.name || '';
 
   return {
-    id: slug || String(node.id || ''),
+    id: String(node.id || slug || ''),
     title,
     price,
     url,
@@ -165,7 +184,7 @@ async function fetchProducts(term, filters, sinceTimestamp) {
       const edges = json?.data?.search?.products?.edges;
       if (!Array.isArray(edges)) {
         // products can be null when no results for a time window — not an error
-        if (json?.data?.search?.products === null && sinceTimestamp) {
+        if (json?.data?.search?.products === null) {
           return [];
         }
         console.warn(`[enjoeiApi] Unexpected response structure for "${term}"`);

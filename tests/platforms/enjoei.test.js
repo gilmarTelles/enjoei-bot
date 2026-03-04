@@ -8,7 +8,7 @@ describe('enjoeiApi.normalizeProduct', () => {
       price: { original: 200, current: 150 },
       path: 'nike-air-max-90-abc123',
       photo: { image_public_id: 'abc123def' },
-      user: { name: 'joao' },
+      store: { displayable: { name: 'joao' } },
     };
     const product = normalizeProduct(node);
     expect(product.id).toBe('nike-air-max-90-abc123');
@@ -33,10 +33,10 @@ describe('enjoeiApi.normalizeProduct', () => {
     expect(product.seller).toBe('');
   });
 
-  test('handles photo with url fallback', () => {
-    const node = { title: 'Test', price: 10, slug: 'test', photo: { url: 'https://img.enjoei.com.br/a.jpg' } };
+  test('handles photo without image_public_id', () => {
+    const node = { title: { name: 'Test' }, price: 10, path: 'test', photo: {} };
     const product = normalizeProduct(node);
-    expect(product.image).toBe('https://img.enjoei.com.br/a.jpg');
+    expect(product.image).toBe('');
   });
 });
 
@@ -50,10 +50,10 @@ describe('enjoeiApi.buildSearchParams', () => {
     expect(params.get('search_id')).toBeTruthy();
   });
 
-  test('includes sinceTimestamp as ISO', () => {
+  test('includes sinceTimestamp in Brazil timezone format', () => {
     const ts = new Date('2026-01-01T00:00:00Z').getTime();
     const params = buildSearchParams('nike', null, ts);
-    expect(params.get('last_published_at')).toBe('2026-01-01T00:00:00Z');
+    expect(params.get('last_published_at')).toBe('2025-12-31T21:00:00-03:00');
   });
 
   test('maps filters correctly', () => {
