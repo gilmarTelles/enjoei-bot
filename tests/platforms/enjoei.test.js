@@ -26,9 +26,10 @@ describe('enjoeiApi.normalizeProduct', () => {
   });
 
   test('handles missing optional fields', () => {
-    const node = { id: '12345', title: 'Test', price: 50 };
+    const node = { id: '12345', title: { name: 'Test' }, price: 50 };
     const product = normalizeProduct(node);
     expect(product.id).toBe('12345');
+    expect(product.title).toBe('Test');
     expect(product.image).toBe('');
     expect(product.seller).toBe('');
   });
@@ -83,8 +84,8 @@ describe('enjoei.searchProducts', () => {
       search: {
         products: {
           edges: [
-            { node: { title: { name: 'Nike Air' }, price: { current: 100 }, path: 'nike-air-1', photo: { image_public_id: 'img1' }, user: { name: 'seller1' } } },
-            { node: { title: { name: 'Nike Dunk' }, price: { current: 200 }, path: 'nike-dunk-2', photo: { image_public_id: 'img2' }, user: { name: 'seller2' } } },
+            { node: { title: { name: 'Nike Air' }, price: { current: 100 }, path: 'nike-air-1', photo: { image_public_id: 'img1' }, store: { displayable: { name: 'seller1' } } } },
+            { node: { title: { name: 'Nike Dunk' }, price: { current: 200 }, path: 'nike-dunk-2', photo: { image_public_id: 'img2' }, store: { displayable: { name: 'seller2' } } } },
           ],
         },
       },
@@ -109,8 +110,10 @@ describe('enjoei.searchProducts', () => {
     const products = await enjoei.searchProducts('nike', null);
     expect(products).toHaveLength(2);
     expect(products[0].title).toBe('Nike Air');
+    expect(products[0].seller).toBe('seller1');
     expect(products[0].url).toContain('/p/nike-air-1');
     expect(products[1].title).toBe('Nike Dunk');
+    expect(products[1].seller).toBe('seller2');
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const calledUrl = global.fetch.mock.calls[0][0];
     expect(calledUrl).toContain('enjusearch.enjoei.com.br');
@@ -125,11 +128,19 @@ describe('enjoei.searchProducts', () => {
   });
 
   test('returns empty array on API error', async () => {
+    jest.useFakeTimers();
     global.fetch = jest.fn(() =>
       Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve('error') })
     );
-    const products = await enjoei.searchProducts('nike', null);
+    const promise = enjoei.searchProducts('nike', null);
+    // Advance past retry delays (1s, 2s, 3s)
+    for (let i = 0; i < 3; i++) {
+      await Promise.resolve();
+      jest.advanceTimersByTime(5000);
+    }
+    const products = await promise;
     expect(products).toEqual([]);
+    jest.useRealTimers();
   });
 });
 

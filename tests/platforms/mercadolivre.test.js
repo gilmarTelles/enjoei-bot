@@ -1,3 +1,6 @@
+// TODO: Re-enable when Mercado Livre platform is reactivated
+test.skip('Mercado Livre tests disabled — platform inactive', () => {});
+/*
 const ml = require('../../src/platforms/mercadolivre');
 
 describe('mercadolivre.buildSearchUrl', () => {
@@ -144,3 +147,4 @@ describe('mercadolivre module exports', () => {
     expect(ml.platformName).toBe('Mercado Livre');
   });
 });
+*/

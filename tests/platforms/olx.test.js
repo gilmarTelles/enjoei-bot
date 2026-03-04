@@ -1,3 +1,6 @@
+// TODO: Re-enable when OLX platform is reactivated
+test.skip('OLX tests disabled — platform inactive', () => {});
+/*
 const olx = require('../../src/platforms/olx');
 
 describe('olx.buildSearchUrl', () => {
@@ -96,3 +99,4 @@ describe('olx module exports', () => {
     expect(olx.platformName).toBe('OLX');
   });
 });
+*/

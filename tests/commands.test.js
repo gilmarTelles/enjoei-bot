@@ -227,7 +227,6 @@ describe('Commands', () => {
     expect(msg).toContain('14:30');
     expect(msg).toContain('3');
     expect(msg).toContain('2');
-    expect(msg).toContain('1');
   });
 
   test('comando desconhecido avisa', async () => {

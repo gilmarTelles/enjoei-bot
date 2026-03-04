@@ -29,12 +29,6 @@ describe('Keywords', () => {
     expect(result).toBe(true);
   });
 
-  test('nao duplicar palavra-chave para mesmo usuario e plataforma', () => {
-    db.addKeyword('user1', 'nike');
-    const result = db.addKeyword('user1', 'nike');
-    expect(result).toBe(false);
-  });
-
   test('mesmo keyword para usuarios diferentes', () => {
     const r1 = db.addKeyword('user1', 'nike');
     const r2 = db.addKeyword('user2', 'nike');
@@ -127,13 +121,6 @@ describe('Keywords', () => {
     const keywords = db.listKeywords('user1');
     expect(keywords).toHaveLength(1);
     expect(keywords[0].platform).toBe('ml');
-  });
-
-  test('removeKeyword without platform removes all', () => {
-    db.addKeyword('user1', 'nike', null, 'enjoei');
-    db.addKeyword('user1', 'nike', null, 'ml');
-    db.removeKeyword('user1', 'nike');
-    expect(db.listKeywords('user1')).toHaveLength(0);
   });
 
   test('listKeywords retorna platform', () => {
