@@ -147,7 +147,7 @@ function normalizeProduct(node) {
 // Execute curl as a subprocess to avoid Node.js TLS fingerprinting by Cloudflare
 function curlFetch(url, headers) {
   return new Promise((resolve, reject) => {
-    const args = ['-s', '-S', '--max-time', '15', '-k', '-w', '\n%{http_code}'];
+    const args = ['-s', '-S', '--max-time', '8', '-k', '-w', '\n%{http_code}'];
 
     if (PROXY_URL) {
       args.push('--proxy', PROXY_URL);

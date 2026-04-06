@@ -7,14 +7,15 @@ const commands = require('./commands');
 const { notifyNewProducts } = require('./notifier');
 const { getPlatform, DEFAULT_PLATFORM } = require('./platforms');
 const { filterByRelevance } = require('./relevanceFilter');
+const enjoeiApi = require('./enjoeiApi');
 const { parsePrice } = commands;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 2000;
+const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_SEARCHES, 10) || 10;
 const PURGE_DAYS = 7;
 const STALE_THRESHOLD = 3;
-const API_DELAY_MS = 500;
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -43,6 +44,7 @@ if (!TELEGRAM_BOT_TOKEN) {
 let consecutiveEmptyChecks = 0;
 let checkRunning = false;
 let pollTimeoutId = null;
+let dailyNewProducts = 0;
 
 async function notifyAdmin(text) {
   if (!ADMIN_CHAT_ID) return;
@@ -100,6 +102,19 @@ function buildGroups(allUserKeywords) {
   }
 
   return Object.values(groupMap);
+}
+
+async function runWithConcurrency(items, limit, fn) {
+  const results = [];
+  let index = 0;
+  async function next() {
+    const i = index++;
+    if (i >= items.length) return;
+    results[i] = await fn(items[i], i);
+    await next();
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => next()));
+  return results;
 }
 
 async function processProducts(products, keyword, platform, users) {
@@ -180,14 +195,13 @@ async function runCheck() {
     let allEmpty = true;
     let hadError = false;
 
-    for (let i = 0; i < groups.length; i++) {
-      const { keyword, filters, platform, users } = groups[i];
+    await runWithConcurrency(groups, MAX_CONCURRENT, async ({ keyword, filters, platform, users }) => {
       const platformModule = getPlatform(platform);
       const platformLabel = platformModule ? platformModule.platformName : platform;
 
       if (!platformModule) {
         console.error(`[check] Plataforma desconhecida: "${platform}", pulando "${keyword}"`);
-        continue;
+        return;
       }
 
       try {
@@ -201,17 +215,12 @@ async function runCheck() {
         const newCount = await processProducts(products, keyword, platform, users);
         totalNewProducts += newCount;
         if (newCount > 0) byPlatform[platform] = (byPlatform[platform] || 0) + newCount;
-
-        // Rate limiting between API calls
-        if (i < groups.length - 1) {
-          await new Promise(r => setTimeout(r, API_DELAY_MS));
-        }
       } catch (err) {
         hadError = true;
         console.error(`[check] Erro em "${keyword}" [${platformLabel}]:`, err.message);
         await notifyAdmin(`Erro ao buscar "${keyword}" [${platformLabel}]: ${err.message}`);
       }
-    }
+    });
 
     // Stale detection
     if (allEmpty && groups.length > 0) {
@@ -235,6 +244,7 @@ async function runCheck() {
       newProductsFound: totalNewProducts,
     });
 
+    dailyNewProducts += totalNewProducts;
     console.log(`[check] Concluido. ${totalNewProducts} novo(s).`);
     return { totalNew: totalNewProducts, byPlatform };
   } finally {
@@ -257,9 +267,9 @@ async function runHistorySweep() {
 
   console.log(`[sweep] Marcando produtos existentes para ${groups.length} grupo(s)...`);
 
-  for (const { keyword, filters, platform, users } of groups) {
+  await runWithConcurrency(groups, MAX_CONCURRENT, async ({ keyword, filters, platform, users }) => {
     const platformModule = getPlatform(platform);
-    if (!platformModule) continue;
+    if (!platformModule) return;
 
     const platformLabel = platformModule.platformName;
     let totalSeen = 0;
@@ -275,14 +285,12 @@ async function runHistorySweep() {
           }
         }
       }
-
-      await new Promise(r => setTimeout(r, API_DELAY_MS));
     } catch (err) {
       console.error(`[sweep] Erro em "${keyword}" [${platformLabel}]: ${err.message}`);
     }
 
     console.log(`[sweep] "${keyword}" [${platformLabel}]: ${totalSeen} produto(s) marcado(s) como visto(s)`);
-  }
+  });
 
   console.log('[sweep] Sweep concluido.');
 }
@@ -312,8 +320,16 @@ async function main() {
   commands.register(bot);
   console.log('[bot] Comandos registrados.');
 
+  // Wire enjoeiApi alert callback to admin notifications
+  enjoeiApi.setAlertCallback((msg) => notifyAdmin(msg));
+
   // Sweep history to mark existing products as seen (prevents false notifications)
   await runHistorySweep();
+
+  // Startup summary
+  const allKw = db.getAllUserKeywords();
+  const groups = buildGroups(allKw);
+  await notifyAdmin(`Bot iniciado. Monitorando ${allKw.length} palavra(s)-chave em ${groups.length} grupo(s).`);
 
   // Start continuous polling
   startPollingLoop();
@@ -323,14 +339,30 @@ async function main() {
     console.log('[cron] Manutencao diaria');
     runMaintenance().catch(err => console.error('[cron] Erro manutencao:', err.message));
   });
-  console.log('[bot] Manutencao diaria agendada (4h).');
 
+  // Reset daily counter at midnight
+  cron.schedule('0 0 * * *', () => {
+    dailyNewProducts = 0;
+  });
+
+  // Heartbeat every 6 hours
+  cron.schedule('0 */6 * * *', () => {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+    notifyAdmin(`Heartbeat: Bot rodando. Ultimo ciclo: ${timeStr}. ${dailyNewProducts} produto(s) novo(s) hoje.`)
+      .catch(err => console.error('[cron] Erro heartbeat:', err.message));
+  });
+
+  console.log('[bot] Manutencao diaria agendada (4h). Heartbeat a cada 6h.');
   console.log('[bot] Bot rodando. Ctrl+C para parar.');
 }
 
 async function shutdown() {
   console.log('\n[bot] Encerrando...');
   if (pollTimeoutId) clearTimeout(pollTimeoutId);
+  try {
+    await notifyAdmin('Bot encerrando.');
+  } catch {}
   const botInstance = telegram.getBot();
   if (botInstance) {
     botInstance.stopPolling();
