@@ -1,4 +1,5 @@
 const { randomUUID } = require('crypto');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -6,10 +7,19 @@ const GRAPHQL_URL = 'https://enjusearch.enjoei.com.br/graphql-search-x';
 const QUERY_ID = 'c5faa5f85fb47bf0beaa97b67d8a9189';
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
+const PROXY_URL = process.env.PROXY_URL || '';
 
 // Location defaults (Enjoei uses these for search relevance)
 const CITY = process.env.ENJOEI_CITY || 'sao-jose-dos-pinhais';
 const STATE = process.env.ENJOEI_STATE || 'pr';
+
+let alertCallback = null;
+
+function setAlertCallback(fn) { alertCallback = fn; }
+
+function alert(msg) {
+  if (alertCallback) alertCallback(msg).catch(() => {});
+}
 
 let browserId = null;
 
@@ -40,8 +50,8 @@ function buildHeaders() {
     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
     'Origin': 'https://www.enjoei.com.br',
     'Referer': 'https://www.enjoei.com.br/',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+    'sec-ch-ua': '"Google Chrome";v="135", "Chromium";v="135", "Not-A.Brand";v="8"',
     'sec-ch-ua-mobile': '?0',
     'sec-ch-ua-platform': '"macOS"',
     'sec-fetch-dest': 'empty',
@@ -134,28 +144,55 @@ function normalizeProduct(node) {
   };
 }
 
+// Execute curl as a subprocess to avoid Node.js TLS fingerprinting by Cloudflare
+function curlFetch(url, headers) {
+  return new Promise((resolve, reject) => {
+    const args = ['-s', '-S', '--max-time', '15', '-w', '\n%{http_code}'];
+
+    if (PROXY_URL) {
+      args.push('--proxy', PROXY_URL);
+    }
+
+    for (const [key, value] of Object.entries(headers)) {
+      args.push('-H', `${key}: ${value}`);
+    }
+
+    args.push(url);
+
+    execFile('curl', args, { maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        return reject(new Error(`curl failed: ${err.message} ${stderr || ''}`));
+      }
+
+      const lines = stdout.trimEnd().split('\n');
+      const statusCode = parseInt(lines.pop(), 10);
+      const body = lines.join('\n');
+
+      resolve({ status: statusCode, body });
+    });
+  });
+}
+
 async function fetchProducts(term, filters, sinceTimestamp) {
   const params = buildSearchParams(term, filters, sinceTimestamp);
   const url = `${GRAPHQL_URL}?${params.toString()}`;
+  const headers = buildHeaders();
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: buildHeaders(),
-      });
+      const response = await curlFetch(url, headers);
 
       if (response.status === 429) {
-        const retryAfter = parseInt(response.headers.get('Retry-After') || '5', 10);
-        console.warn(`[enjoeiApi] Rate limited (429), waiting ${retryAfter}s...`);
-        await new Promise(r => setTimeout(r, retryAfter * 1000));
+        console.warn(`[enjoeiApi] Rate limited (429), waiting 5s...`);
+        alert(`Rate limit (429) ao buscar "${term}". Retry em 5s (tentativa ${attempt}/${MAX_RETRIES}).`);
+        await new Promise(r => setTimeout(r, 5000));
         continue;
       }
 
       if (response.status === 403 || response.status === 503) {
-        const body = await response.text();
-        if (body.includes('<html') || body.includes('cloudflare')) {
+        if (response.body.includes('<html') || response.body.includes('cloudflare')) {
           console.error(`[enjoeiApi] Cloudflare block detected (${response.status})`);
+          alert(`Cloudflare block (${response.status}) ao buscar "${term}" (tentativa ${attempt}/${MAX_RETRIES}).`);
           if (attempt < MAX_RETRIES) {
             await new Promise(r => setTimeout(r, RETRY_BASE_MS * attempt));
             continue;
@@ -164,7 +201,7 @@ async function fetchProducts(term, filters, sinceTimestamp) {
         }
       }
 
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         console.error(`[enjoeiApi] HTTP ${response.status} for "${term}"`);
         if (attempt < MAX_RETRIES) {
           await new Promise(r => setTimeout(r, RETRY_BASE_MS * attempt));
@@ -173,7 +210,7 @@ async function fetchProducts(term, filters, sinceTimestamp) {
         return [];
       }
 
-      const json = await response.json();
+      const json = JSON.parse(response.body);
 
       // Check for GraphQL errors
       if (json.errors && json.errors.length > 0) {
@@ -200,8 +237,9 @@ async function fetchProducts(term, filters, sinceTimestamp) {
     }
   }
 
+  alert(`Todas as ${MAX_RETRIES} tentativas falharam para "${term}".`);
   console.error(`[enjoeiApi] All ${MAX_RETRIES} attempts failed for "${term}"`);
   return [];
 }
 
-module.exports = { fetchProducts, normalizeProduct, getBrowserId, buildSearchParams };
+module.exports = { fetchProducts, normalizeProduct, getBrowserId, buildSearchParams, setAlertCallback };
