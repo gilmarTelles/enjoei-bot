@@ -121,7 +121,7 @@ The bot uses a plugin-based architecture for marketplace platforms:
 
 - **Platform Isolation**: Errors in one platform don't crash checks for other platforms
 - **Stale API Detection**: If all searches return empty results N times consecutively, admin is notified (potential API change or Cloudflare block)
-- **Rate Limiting**: 500ms delay between API calls
+- **Concurrent Polling**: API calls run in parallel batches (default 5 concurrent, configurable via MAX_CONCURRENT_SEARCHES)
 - **Database Migrations**: Non-destructive migrations using `ALTER TABLE` with try/catch
 - **Graceful Degradation**: AI relevance filter fails silently and returns all products
 
@@ -139,6 +139,8 @@ ADMIN_CHAT_ID=your_chat_id  # For error notifications
 ANTHROPIC_API_KEY=your_key  # For AI relevance filtering
 ENABLE_RELEVANCE_FILTER=true  # Enable AI filtering
 POLL_INTERVAL_MS=2000  # Milliseconds between polling cycles (default: 2000)
+MAX_CONCURRENT_SEARCHES=5  # Max concurrent API searches per cycle (default: 5)
+PROXY_URL=http://user:pass@proxy:port  # HTTP/SOCKS proxy for API requests (rotating proxies supported)
 ENJOEI_CITY=sao-jose-dos-pinhais  # City for search relevance (default: sao-jose-dos-pinhais)
 ENJOEI_STATE=pr  # State for search relevance (default: pr)
 SSH_SERVER=user@host  # Production server SSH

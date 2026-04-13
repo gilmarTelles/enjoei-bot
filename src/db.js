@@ -45,28 +45,40 @@ function init(customDbPath) {
 
   // Migration: add max_price column to keywords
   try {
-    db.exec('ALTER TABLE keywords ADD COLUMN max_price REAL');
+    const addMaxPrice = db.transaction(() => {
+      db.exec('ALTER TABLE keywords ADD COLUMN max_price REAL');
+    });
+    addMaxPrice();
   } catch (err) {
     // Column already exists — ignore
   }
 
   // Migration: add filters column to keywords
   try {
-    db.exec('ALTER TABLE keywords ADD COLUMN filters TEXT');
+    const addFilters = db.transaction(() => {
+      db.exec('ALTER TABLE keywords ADD COLUMN filters TEXT');
+    });
+    addFilters();
   } catch (err) {
     // Column already exists — ignore
   }
 
   // Migration: add platform column to keywords (default 'enjoei')
   try {
-    db.exec("ALTER TABLE keywords ADD COLUMN platform TEXT NOT NULL DEFAULT 'enjoei'");
+    const addPlatformKw = db.transaction(() => {
+      db.exec("ALTER TABLE keywords ADD COLUMN platform TEXT NOT NULL DEFAULT 'enjoei'");
+    });
+    addPlatformKw();
   } catch (err) {
     // Column already exists — ignore
   }
 
   // Migration: add platform column to seen_products (default 'enjoei')
   try {
-    db.exec("ALTER TABLE seen_products ADD COLUMN platform TEXT NOT NULL DEFAULT 'enjoei'");
+    const addPlatformSp = db.transaction(() => {
+      db.exec("ALTER TABLE seen_products ADD COLUMN platform TEXT NOT NULL DEFAULT 'enjoei'");
+    });
+    addPlatformSp();
   } catch (err) {
     // Column already exists — ignore
   }
@@ -75,50 +87,55 @@ function init(customDbPath) {
   try {
     const spInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='seen_products'").get();
     if (spInfo && spInfo.sql && !spInfo.sql.includes('UNIQUE(product_id, keyword, chat_id, platform)')) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS seen_products_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          product_id TEXT NOT NULL,
-          keyword TEXT NOT NULL,
-          chat_id TEXT NOT NULL,
-          title TEXT,
-          price TEXT,
-          url TEXT,
-          first_seen_at TEXT DEFAULT (datetime('now')),
-          platform TEXT NOT NULL DEFAULT 'enjoei',
-          UNIQUE(product_id, keyword, chat_id, platform)
-        );
-        INSERT OR IGNORE INTO seen_products_new (id, product_id, keyword, chat_id, title, price, url, first_seen_at, platform)
-          SELECT id, product_id, keyword, chat_id, title, price, url, first_seen_at, platform FROM seen_products;
-        DROP TABLE seen_products;
-        ALTER TABLE seen_products_new RENAME TO seen_products;
-      `);
+      const migrateSp = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS seen_products_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id TEXT NOT NULL,
+            keyword TEXT NOT NULL,
+            chat_id TEXT NOT NULL,
+            title TEXT,
+            price TEXT,
+            url TEXT,
+            first_seen_at TEXT DEFAULT (datetime('now')),
+            platform TEXT NOT NULL DEFAULT 'enjoei',
+            UNIQUE(product_id, keyword, chat_id, platform)
+          );
+          INSERT OR IGNORE INTO seen_products_new (id, product_id, keyword, chat_id, title, price, url, first_seen_at, platform)
+            SELECT id, product_id, keyword, chat_id, title, price, url, first_seen_at, platform FROM seen_products;
+          DROP TABLE seen_products;
+          ALTER TABLE seen_products_new RENAME TO seen_products;
+        `);
+      });
+      migrateSp();
     }
   } catch (err) {
     console.error('[db] Migration error (seen_products unique constraint):', err.message);
   }
 
   // Migration: recreate keywords table with UNIQUE(chat_id, keyword, platform) instead of UNIQUE(chat_id, keyword)
-  // Check if we need to migrate by inspecting existing unique index
   try {
     const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='keywords'").get();
     if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('UNIQUE(chat_id, keyword, platform)')) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS keywords_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          chat_id TEXT NOT NULL,
-          keyword TEXT NOT NULL,
-          created_at TEXT DEFAULT (datetime('now')),
-          max_price REAL,
-          filters TEXT,
-          platform TEXT NOT NULL DEFAULT 'enjoei',
-          UNIQUE(chat_id, keyword, platform)
-        );
-        INSERT OR IGNORE INTO keywords_new (id, chat_id, keyword, created_at, max_price, filters, platform)
-          SELECT id, chat_id, keyword, created_at, max_price, filters, platform FROM keywords;
-        DROP TABLE keywords;
-        ALTER TABLE keywords_new RENAME TO keywords;
-      `);
+      const migrateKw = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS keywords_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id TEXT NOT NULL,
+            keyword TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            max_price REAL,
+            filters TEXT,
+            platform TEXT NOT NULL DEFAULT 'enjoei',
+            UNIQUE(chat_id, keyword, platform)
+          );
+          INSERT OR IGNORE INTO keywords_new (id, chat_id, keyword, created_at, max_price, filters, platform)
+            SELECT id, chat_id, keyword, created_at, max_price, filters, platform FROM keywords;
+          DROP TABLE keywords;
+          ALTER TABLE keywords_new RENAME TO keywords;
+        `);
+      });
+      migrateKw();
     }
   } catch (err) {
     console.error('[db] Migration error (keywords unique constraint):', err.message);
@@ -190,8 +207,8 @@ function countKeywords(chatId) {
 
 function purgeOldProducts(days) {
   const result = db.prepare(
-    "DELETE FROM seen_products WHERE first_seen_at < datetime('now', ? || ' days')"
-  ).run(-days);
+    "DELETE FROM seen_products WHERE first_seen_at < datetime('now', '-' || ? || ' days')"
+  ).run(days);
   return result.changes;
 }
 
@@ -214,16 +231,10 @@ function getDb() {
   return db;
 }
 
-function getSeenProductRowId(productId, keyword, chatId, platform = 'enjoei') {
-  const row = db.prepare('SELECT id FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').get(productId, keyword, chatId, platform);
-  return row ? row.id : null;
-}
-
 module.exports = {
   init, addKeyword, removeKeyword, listKeywords, listKeywordsWithId,
   getKeywordByIdAndChat, updateFilters, getAllUserKeywords,
   isProductSeen, markProductSeen,
   countKeywords, purgeOldProducts, backupDb, getDb,
   setPaused, isPaused,
-  getSeenProductRowId,
 };

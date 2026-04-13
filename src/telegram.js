@@ -16,18 +16,20 @@ function init(token) {
 async function sendMessage(chatId, text, extra = {}) {
   try {
     await bot.sendMessage(chatId, text, { parse_mode: 'Markdown', ...extra });
+    return true;
   } catch (err) {
     console.error('[telegram] Erro ao enviar mensagem:', err.message);
+    return false;
   }
 }
 
 async function sendPhoto(chatId, imageUrl, caption, extra = {}) {
   try {
     await bot.sendPhoto(chatId, imageUrl, { caption, parse_mode: 'Markdown', ...extra });
+    return true;
   } catch (err) {
     console.error('[telegram] Erro ao enviar foto:', err.message);
-    // Fallback to text message if photo fails
-    await sendMessage(chatId, caption, extra);
+    return await sendMessage(chatId, caption, extra);
   }
 }
 

@@ -20,7 +20,6 @@ jest.mock('../src/commands', () => ({
   register: jest.fn(),
   setCheckCallback: jest.fn(),
   setStatusData: jest.fn(),
-  parsePrice: jest.fn(),
 }));
 jest.mock('../src/notifier', () => ({ notifyNewProducts: jest.fn() }));
 jest.mock('../src/relevanceFilter', () => ({ filterByRelevance: jest.fn(p => p) }));

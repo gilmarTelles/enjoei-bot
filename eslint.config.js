@@ -1,0 +1,66 @@
+import js from "@eslint/js";
+import prettier from "eslint-config-prettier";
+
+export default [
+  js.configs.recommended,
+  prettier,
+  {
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "commonjs",
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        setTimeout: "readonly",
+        setInterval: "readonly",
+        clearTimeout: "readonly",
+        clearInterval: "readonly",
+        Buffer: "readonly",
+        __dirname: "readonly",
+        __filename: "readonly",
+        module: "readonly",
+        require: "readonly",
+        exports: "writable",
+        URL: "readonly",
+        URLSearchParams: "readonly",
+        parseInt: "readonly",
+        parseFloat: "readonly",
+        isNaN: "readonly",
+        Date: "readonly",
+        Map: "readonly",
+        Set: "readonly",
+        Promise: "readonly",
+        Array: "readonly",
+        Object: "readonly",
+        String: "readonly",
+        Number: "readonly",
+        Boolean: "readonly",
+        Error: "readonly",
+        RegExp: "readonly",
+        JSON: "readonly",
+        Math: "readonly",
+        Intl: "readonly",
+      },
+    },
+    rules: {
+      "no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+      "no-undef": "off",
+    },
+  },
+  {
+    files: ["tests/**/*.js"],
+    languageOptions: {
+      globals: {
+        describe: "readonly",
+        test: "readonly",
+        it: "readonly",
+        expect: "readonly",
+        beforeEach: "readonly",
+        afterEach: "readonly",
+        beforeAll: "readonly",
+        afterAll: "readonly",
+        jest: "readonly",
+      },
+    },
+  },
+];

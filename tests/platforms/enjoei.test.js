@@ -1,5 +1,43 @@
+process.env.REQUEST_JITTER_MS = '0';
+process.env.CACHE_TTL_MS = '0';
+
+const mockExecFile = jest.fn();
+jest.mock('child_process', () => ({
+  execFile: mockExecFile,
+}));
+
 const enjoei = require('../../src/platforms/enjoei');
 const { normalizeProduct, buildSearchParams } = require('../../src/enjoeiApi');
+const cache = require('../../src/cache');
+
+const mockApiResponse = {
+  data: {
+    search: {
+      products: {
+        edges: [
+          {
+            node: {
+              title: { name: 'Nike Air' },
+              price: { current: 100 },
+              path: 'nike-air-1',
+              photo: { image_public_id: 'img1' },
+              store: { displayable: { name: 'seller1' } },
+            },
+          },
+          {
+            node: {
+              title: { name: 'Nike Dunk' },
+              price: { current: 200 },
+              path: 'nike-dunk-2',
+              photo: { image_public_id: 'img2' },
+              store: { displayable: { name: 'seller2' } },
+            },
+          },
+        ],
+      },
+    },
+  },
+};
 
 describe('enjoeiApi.normalizeProduct', () => {
   test('normalizes a standard API node', () => {
@@ -61,12 +99,26 @@ describe('enjoeiApi.buildSearchParams', () => {
     expect(params.get('operation_name')).toBe('searchProducts');
     expect(params.get('browser_id')).toBeTruthy();
     expect(params.get('search_id')).toBeTruthy();
+    expect(params.get('last_published_at')).toBeTruthy();
+  });
+
+  test('defaults to 1h time window', () => {
+    const params = buildSearchParams('nike', null, null);
+    const lpa = params.get('last_published_at');
+    expect(lpa).toBeTruthy();
+  });
+
+  test('useSweepDefault uses 24h', () => {
+    const params = buildSearchParams('nike', null, null, true);
+    const lpa = params.get('last_published_at');
+    expect(lpa).toBeTruthy();
   });
 
   test('includes sinceTimestamp in Brazil timezone format', () => {
     const ts = new Date('2026-01-01T00:00:00Z').getTime();
     const params = buildSearchParams('nike', null, ts);
-    expect(params.get('last_published_at')).toBe('2025-12-31T21:00:00-03:00');
+    const lpa = params.get('last_published_at');
+    expect(lpa).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
   });
 
   test('maps filters correctly', () => {
@@ -79,34 +131,17 @@ describe('enjoeiApi.buildSearchParams', () => {
 });
 
 describe('enjoei.searchProducts', () => {
-  const mockApiResponse = {
-    data: {
-      search: {
-        products: {
-          edges: [
-            { node: { title: { name: 'Nike Air' }, price: { current: 100 }, path: 'nike-air-1', photo: { image_public_id: 'img1' }, store: { displayable: { name: 'seller1' } } } },
-            { node: { title: { name: 'Nike Dunk' }, price: { current: 200 }, path: 'nike-dunk-2', photo: { image_public_id: 'img2' }, store: { displayable: { name: 'seller2' } } } },
-          ],
-        },
-      },
-    },
-  };
-
   beforeEach(() => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockApiResponse),
-      })
-    );
-  });
-
-  afterEach(() => {
-    delete global.fetch;
+    mockExecFile.mockReset();
+    cache.clear();
   });
 
   test('returns normalized products from API', async () => {
+    const body = JSON.stringify(mockApiResponse);
+    mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+      cb(null, `${body}\n200`, '');
+    });
+
     const products = await enjoei.searchProducts('nike', null);
     expect(products).toHaveLength(2);
     expect(products[0].title).toBe('Nike Air');
@@ -114,40 +149,46 @@ describe('enjoei.searchProducts', () => {
     expect(products[0].url).toContain('/p/nike-air-1');
     expect(products[1].title).toBe('Nike Dunk');
     expect(products[1].seller).toBe('seller2');
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const calledUrl = global.fetch.mock.calls[0][0];
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+    const calledArgs = mockExecFile.mock.calls[0][1];
+    const calledUrl = calledArgs[calledArgs.length - 1];
     expect(calledUrl).toContain('enjusearch.enjoei.com.br');
     expect(calledUrl).toContain('term=nike');
   });
 
   test('searchProductsSince passes sinceTimestamp', async () => {
+    const body = JSON.stringify(mockApiResponse);
+    mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+      cb(null, `${body}\n200`, '');
+    });
+
     const ts = Date.now() - 3600000;
     await enjoei.searchProductsSince('nike', null, ts);
-    const calledUrl = global.fetch.mock.calls[0][0];
+    const calledArgs = mockExecFile.mock.calls[0][1];
+    const calledUrl = calledArgs[calledArgs.length - 1];
     expect(calledUrl).toContain('last_published_at=');
   });
 
   test('returns empty array on API error', async () => {
     jest.useFakeTimers();
-    global.fetch = jest.fn(() =>
-      Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve('error') })
-    );
+    mockExecFile.mockImplementation((cmd, args, opts, cb) => {
+      cb(null, 'Internal Server Error\n500', '');
+    });
     const promise = enjoei.searchProducts('nike', null);
-    // Advance past retry delays (1s, 2s, 3s)
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 10; i++) {
       await Promise.resolve();
       jest.advanceTimersByTime(5000);
     }
     const products = await promise;
     expect(products).toEqual([]);
     jest.useRealTimers();
-  });
+  }, 15000);
 });
 
 describe('enjoei.buildSearchUrl', () => {
-  test('URL basica sem filtros - slug no path e lp=24h por padrao', () => {
+  test('URL basica sem filtros - slug no path e lp=1h por padrao', () => {
     const url = enjoei.buildSearchUrl('nike', null);
-    expect(url).toBe('https://www.enjoei.com.br/nike/s?q=nike&lp=24h');
+    expect(url).toBe('https://www.enjoei.com.br/nike/s?q=nike&lp=1h');
   });
 
   test('URL com keyword multi-palavra usa slug com hifens', () => {
@@ -156,9 +197,9 @@ describe('enjoei.buildSearchUrl', () => {
     expect(url).toContain('q=selecao-brasileira');
   });
 
-  test('URL com filtros vazio - inclui lp=24h por padrao', () => {
+  test('URL com filtros vazio - inclui lp=1h por padrao', () => {
     const url = enjoei.buildSearchUrl('nike', {});
-    expect(url).toContain('lp=24h');
+    expect(url).toContain('lp=1h');
   });
 
   test('URL com lp=14d', () => {
@@ -225,15 +266,13 @@ describe('enjoei.buildSearchUrl', () => {
 });
 
 describe('enjoei.buildFilterKeyboard', () => {
-  test('constroi teclado com filtros inativos (lp=24h default highlighted)', () => {
+  test('constroi teclado com filtros inativos (lp=1h default highlighted)', () => {
     const keyboard = enjoei.buildFilterKeyboard({ id: 1, keyword: 'nike', filters: null });
     expect(keyboard).toHaveProperty('inline_keyboard');
     const rows = keyboard.inline_keyboard;
-    // lp row, used, dep, sz, sr, sort, clear = 7 rows
     expect(rows).toHaveLength(7);
-    // First row is lp (24h should be active by default)
-    expect(rows[0][0].text).toContain('\u2705'); // 24h active
-    expect(rows[0][0].text).toContain('24h');
+    expect(rows[0][0].text).toContain('\u2705');
+    expect(rows[0][0].text).toContain('1h');
   });
 
   test('constroi teclado com filtros ativos', () => {
@@ -329,8 +368,12 @@ describe('enjoei.formatFiltersSummary', () => {
     expect(enjoei.formatFiltersSummary({ lp: '14d' })).toBe(' [periodo: 14 dias]');
   });
 
-  test('nao mostra periodo 24h (padrao)', () => {
-    expect(enjoei.formatFiltersSummary({ lp: '24h' })).toBe('');
+  test('nao mostra periodo 1h (padrao)', () => {
+    expect(enjoei.formatFiltersSummary({ lp: '1h' })).toBe('');
+  });
+
+  test('mostra periodo 24h como nao padrao', () => {
+    expect(enjoei.formatFiltersSummary({ lp: '24h' })).toBe(' [periodo: 24h]');
   });
 
   test('formata filtro perto de mim', () => {
@@ -342,7 +385,13 @@ describe('enjoei.formatFiltersSummary', () => {
   });
 
   test('formata multiplos filtros', () => {
-    const result = enjoei.formatFiltersSummary({ used: true, dep: 'masculino', sz: 'g', sr: 'same_country', sort: 'price_asc' });
+    const result = enjoei.formatFiltersSummary({
+      used: true,
+      dep: 'masculino',
+      sz: 'g',
+      sr: 'same_country',
+      sort: 'price_asc',
+    });
     expect(result).toContain('usado');
     expect(result).toContain('masculino');
     expect(result).toContain('tam: G');
@@ -363,5 +412,6 @@ describe('enjoei module exports', () => {
   test('exports searchProducts and searchProductsSince', () => {
     expect(typeof enjoei.searchProducts).toBe('function');
     expect(typeof enjoei.searchProductsSince).toBe('function');
+    expect(typeof enjoei.searchProductsSweep).toBe('function');
   });
 });

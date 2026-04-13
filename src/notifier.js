@@ -8,6 +8,9 @@ function formatProduct(product, keyword, platform) {
     `\u{1F6A8} *Novo item no ${escapeMd(platformLabel)}!*`,
     '',
   ];
+  if (product.title) {
+    lines.push(`*Titulo:* ${escapeMd(product.title)}`);
+  }
   lines.push(
     `*Preco:* ${escapeMd(product.price || 'N/A')}`,
     `*Link:* ${escapeMd(product.url)}`,
@@ -18,16 +21,20 @@ function formatProduct(product, keyword, platform) {
 }
 
 async function notifyNewProducts(products, keyword, chatId, platform) {
+  const notified = [];
   for (let i = 0; i < products.length; i++) {
     const product = products[i];
     const caption = formatProduct(product, keyword, platform);
+    let success;
     if (product.image) {
-      await sendPhoto(chatId, product.image, caption);
+      success = await sendPhoto(chatId, product.image, caption);
     } else {
-      await sendMessage(chatId, caption);
+      success = await sendMessage(chatId, caption);
     }
+    if (success) notified.push(product);
     await new Promise(r => setTimeout(r, 500));
   }
+  return notified;
 }
 
 module.exports = { notifyNewProducts, formatProduct };

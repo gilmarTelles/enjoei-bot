@@ -1,10 +1,12 @@
 {
-  "name": "enjoei-whatsapp-bot",
+  "name": "enjoei-bot",
   "version": "1.0.0",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "jest"
+    "test": "jest",
+    "lint": "eslint src/ tests/",
+    "format": "prettier --write 'src/**/*.js' 'tests/**/*.js'"
   },
   "description": "Enjoei Telegram alert bot - monitors enjoei.com.br via API and sends Telegram alerts for keyword matches",
   "dependencies": {
@@ -15,6 +17,9 @@
     "node-telegram-bot-api": "^0.67.0"
   },
   "devDependencies": {
-    "jest": "^30.2.0"
+    "eslint": "^9.22.0",
+    "eslint-config-prettier": "^10.1.1",
+    "jest": "^30.2.0",
+    "prettier": "^3.5.3"
   }
 }

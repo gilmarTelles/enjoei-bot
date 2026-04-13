@@ -45,7 +45,8 @@ function createMockBot() {
 
 const path = require('path');
 const fs = require('fs');
-const TEST_DB = path.join(__dirname, '..', 'data', 'test_commands.db');
+const os = require('os');
+const TEST_DB = path.join(os.tmpdir(), 'enjoei-bot-test-commands.db');
 
 beforeAll(() => {
   db.init(TEST_DB);
@@ -571,7 +572,7 @@ describe('callback_query handler', () => {
 });
 
 describe('parsePrice', () => {
-  const { parsePrice } = commands;
+  const { parsePrice } = require('../src/utils');
 
   test('parse R$ 150,00', () => {
     expect(parsePrice('R$ 150,00')).toBe(150);
@@ -599,7 +600,7 @@ describe('parsePrice', () => {
 });
 
 describe('sanitizeKeyword', () => {
-  const { sanitizeKeyword } = commands;
+  const { sanitizeKeyword } = require('../src/utils');
 
   test('remove smart double quotes', () => {
     expect(sanitizeKeyword('\u201Crogerio-ceni\u201D')).toBe('rogerio-ceni');
@@ -643,7 +644,7 @@ describe('sanitizeKeyword', () => {
 });
 
 describe('parseFilters', () => {
-  const { parseFilters } = commands;
+  const { parseFilters } = require('../src/utils');
 
   test('parse null retorna objeto vazio', () => {
     expect(parseFilters(null)).toEqual({});

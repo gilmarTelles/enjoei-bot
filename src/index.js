@@ -8,14 +8,17 @@ const { notifyNewProducts } = require('./notifier');
 const { getPlatform, DEFAULT_PLATFORM } = require('./platforms');
 const { filterByRelevance } = require('./relevanceFilter');
 const enjoeiApi = require('./enjoeiApi');
-const { parsePrice } = commands;
+const { parsePrice, parseFilters } = require('./utils');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS, 10) || 2000;
-const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_SEARCHES, 10) || 25;
+const POLL_BASE_INTERVAL_MS = parseInt(process.env.POLL_BASE_INTERVAL_MS, 10) || 5000;
+const POLL_MAX_INTERVAL_MS = parseInt(process.env.POLL_MAX_INTERVAL_MS, 10) || 30000;
+const POLL_BATCH_SIZE = parseInt(process.env.POLL_BATCH_SIZE, 10) || 4;
+const POLL_IDLE_SLOWDOWN_CYCLES = parseInt(process.env.POLL_IDLE_SLOWDOWN_CYCLES, 10) || 5;
+const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_SEARCHES, 10) || 5;
 const PURGE_DAYS = 7;
-const STALE_THRESHOLD = 3;
+const STALE_THRESHOLD = 5;
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -29,22 +32,25 @@ function matchesAllWords(title, keyword) {
   if (!title) return false;
   const normalizedTitle = stripAccents(title.toLowerCase());
   const words = stripAccents(keyword.toLowerCase()).split(/\s+/).filter(Boolean);
-  return words.every(word => {
+  return words.every((word) => {
     const regex = new RegExp(`\\b${escapeRegex(word)}\\b`);
     return regex.test(normalizedTitle);
   });
 }
-
 
 if (!TELEGRAM_BOT_TOKEN) {
   console.error('Erro: TELEGRAM_BOT_TOKEN obrigatorio no .env');
   process.exit(1);
 }
 
-let consecutiveEmptyChecks = 0;
+const groupEmptyCounts = new Map();
 let checkRunning = false;
 let pollTimeoutId = null;
 let dailyNewProducts = 0;
+let lastCheckTime = null;
+let currentPollInterval = POLL_BASE_INTERVAL_MS;
+let consecutiveEmptyCycles = 0;
+let batchIndex = 0;
 
 async function notifyAdmin(text) {
   if (!ADMIN_CHAT_ID) return;
@@ -68,32 +74,20 @@ async function runMaintenance() {
   }
 }
 
-function parseFiltersJson(filtersStr) {
-  if (!filtersStr) return null;
-  try {
-    const obj = JSON.parse(filtersStr);
-    return Object.keys(obj).length > 0 ? obj : null;
-  } catch {
-    return null;
-  }
-}
-
 function buildGroups(allUserKeywords) {
-  // Filter out keywords belonging to paused users
   const pausedSet = new Set();
-  const chatIds = [...new Set(allUserKeywords.map(k => k.chat_id))];
+  const chatIds = [...new Set(allUserKeywords.map((k) => k.chat_id))];
   for (const cid of chatIds) {
     if (db.isPaused(cid)) pausedSet.add(cid);
   }
-  const activeKeywords = allUserKeywords.filter(k => !pausedSet.has(k.chat_id));
+  const activeKeywords = allUserKeywords.filter((k) => !pausedSet.has(k.chat_id));
   if (activeKeywords.length === 0) return [];
 
-  // Group by platform + keyword + filters combo to avoid duplicate searches
   const groupMap = {};
   for (const { id, chat_id, keyword, max_price, filters, platform } of activeKeywords) {
     const plat = platform || DEFAULT_PLATFORM;
-    const parsedFilters = parseFiltersJson(filters);
-    const filtersKey = parsedFilters ? JSON.stringify(parsedFilters) : '';
+    const parsedFilters = parseFilters(filters);
+    const filtersKey = Object.keys(parsedFilters).length > 0 ? JSON.stringify(parsedFilters) : '';
     const groupKey = `${plat}||${keyword}||${filtersKey}`;
     if (!groupMap[groupKey]) {
       groupMap[groupKey] = { keyword, filters: parsedFilters, platform: plat, users: [] };
@@ -121,7 +115,6 @@ async function processProducts(products, keyword, platform, users) {
   const platformModule = getPlatform(platform);
   const platformLabel = (platformModule && platformModule.platformName) || platform;
 
-  // AI relevance filter
   let aiFiltered = products;
   try {
     aiFiltered = await filterByRelevance(products, keyword);
@@ -130,20 +123,20 @@ async function processProducts(products, keyword, platform, users) {
     await notifyAdmin(`Erro no filtro de relevancia para "${keyword}": ${err.message}`);
   }
 
-  // Exact keyword match
   const beforeMatch = aiFiltered.length;
-  const matchedProducts = aiFiltered.filter(p => matchesAllWords(p.title, keyword));
+  const matchedProducts = aiFiltered.filter((p) => matchesAllWords(p.title, keyword));
   if (matchedProducts.length < beforeMatch) {
-    console.log(`[check] Filtro de palavras exatas removeu ${beforeMatch - matchedProducts.length} produto(s) para "${keyword}"`);
+    console.log(
+      `[check] Filtro de palavras exatas removeu ${beforeMatch - matchedProducts.length} produto(s) para "${keyword}"`,
+    );
   }
 
   let totalNew = 0;
 
-  // For each user watching this keyword+filters combo
   for (const { chatId, maxPrice } of users) {
     let filtered = matchedProducts;
     if (maxPrice) {
-      filtered = filtered.filter(p => {
+      filtered = filtered.filter((p) => {
         const price = parsePrice(p.price);
         return price !== null && price <= maxPrice;
       });
@@ -159,8 +152,8 @@ async function processProducts(products, keyword, platform, users) {
     if (newProducts.length > 0) {
       console.log(`[check] ${newProducts.length} novo(s) para "${keyword}" [${platformLabel}] -> usuario ${chatId}`);
       totalNew += newProducts.length;
-      await notifyNewProducts(newProducts, keyword, chatId, platform);
-      for (const product of newProducts) {
+      const notified = await notifyNewProducts(newProducts, keyword, chatId, platform);
+      for (const product of notified) {
         db.markProductSeen(product, keyword, chatId, platform);
       }
     }
@@ -182,18 +175,30 @@ async function runCheck() {
       return { totalNew: 0, byPlatform: {} };
     }
 
-    const groups = buildGroups(allUserKeywords);
-    if (groups.length === 0) {
+    const allGroups = buildGroups(allUserKeywords);
+    if (allGroups.length === 0) {
       console.log('[check] Todos os usuarios estao pausados, pulando.');
       return { totalNew: 0, byPlatform: {} };
     }
 
-    console.log(`[check] Verificando ${groups.length} grupo(s) de busca...`);
+    const startIdx = (batchIndex * POLL_BATCH_SIZE) % allGroups.length;
+    const isLastBatch = startIdx + POLL_BATCH_SIZE >= allGroups.length;
+    let groups;
+    if (startIdx + POLL_BATCH_SIZE >= allGroups.length) {
+      groups = allGroups.slice(startIdx);
+    } else {
+      groups = allGroups.slice(startIdx, startIdx + POLL_BATCH_SIZE);
+    }
+    batchIndex++;
+
+    const batchLabel =
+      allGroups.length > POLL_BATCH_SIZE ? ` (batch ${groups.length}/${allGroups.length}, offset ${startIdx})` : '';
+    console.log(`[check] Verificando ${groups.length} grupo(s)${batchLabel}...`);
 
     let totalNewProducts = 0;
     const byPlatform = {};
-    let allEmpty = true;
     let hadError = false;
+    let cfSkipped = 0;
 
     await runWithConcurrency(groups, MAX_CONCURRENT, async ({ keyword, filters, platform, users }) => {
       const platformModule = getPlatform(platform);
@@ -204,13 +209,30 @@ async function runCheck() {
         return;
       }
 
+      const groupKey = `${platform}||${keyword}||${filters ? JSON.stringify(filters) : ''}`;
+
+      if (enjoeiApi.isCloudflareCooldown()) {
+        cfSkipped++;
+        return;
+      }
+
       try {
         const filtersLabel = filters ? ` (filtros: ${JSON.stringify(filters)})` : '';
         console.log(`[check] Buscando: "${keyword}" [${platformLabel}]${filtersLabel}`);
         const products = await platformModule.searchProducts(keyword, filters);
         console.log(`[check] ${products.length} produto(s) para "${keyword}" [${platformLabel}]`);
 
-        if (products.length > 0) allEmpty = false;
+        if (products.length > 0) {
+          groupEmptyCounts.delete(groupKey);
+        } else {
+          groupEmptyCounts.set(groupKey, (groupEmptyCounts.get(groupKey) || 0) + 1);
+          const count = groupEmptyCounts.get(groupKey);
+          if (count >= STALE_THRESHOLD) {
+            await notifyAdmin(
+              `ALERTA: "${keyword}" [${platformLabel}] sem resultados ha ${count} verificacoes consecutivas.`,
+            );
+          }
+        }
 
         const newCount = await processProducts(products, keyword, platform, users);
         totalNewProducts += newCount;
@@ -222,30 +244,41 @@ async function runCheck() {
       }
     });
 
-    // Stale detection
-    if (allEmpty && groups.length > 0) {
-      if (!hadError) {
-        consecutiveEmptyChecks++;
-        console.warn(`[check] Todas as buscas vazias (${consecutiveEmptyChecks}x consecutivas)`);
-        if (consecutiveEmptyChecks >= STALE_THRESHOLD) {
-          await notifyAdmin(`ALERTA: ${consecutiveEmptyChecks} verificacoes consecutivas sem resultados. A API pode ter mudado ou estar bloqueando!`);
-        }
-      }
-    } else if (!allEmpty) {
-      consecutiveEmptyChecks = 0;
+    if (cfSkipped > 0) {
+      console.log(`[check] ${cfSkipped} grupo(s) pulado(s) por Cloudflare cooldown.`);
     }
 
-    // Update status for /status command
+    if (!hadError && groups.length > 0 && [...groupEmptyCounts.values()].every((c) => c >= STALE_THRESHOLD)) {
+      await notifyAdmin(
+        `ALERTA: Todas as buscas sem resultados ha ${STALE_THRESHOLD}+ verificacoes. A API pode ter mudado!`,
+      );
+    }
+
+    if (totalNewProducts > 0) {
+      consecutiveEmptyCycles = 0;
+      currentPollInterval = POLL_BASE_INTERVAL_MS;
+    } else {
+      consecutiveEmptyCycles++;
+      if (consecutiveEmptyCycles >= POLL_IDLE_SLOWDOWN_CYCLES) {
+        currentPollInterval = Math.min(currentPollInterval + POLL_BASE_INTERVAL_MS, POLL_MAX_INTERVAL_MS);
+        if (currentPollInterval < POLL_MAX_INTERVAL_MS || consecutiveEmptyCycles === POLL_IDLE_SLOWDOWN_CYCLES) {
+          console.log(
+            `[check] Intervalo adaptativo: ${currentPollInterval}ms (ciclos vazios: ${consecutiveEmptyCycles})`,
+          );
+        }
+      }
+    }
+
     const now = new Date();
-    const timeStr = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    lastCheckTime = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     commands.setStatusData({
-      lastCheckTime: timeStr,
+      lastCheckTime,
       keywordsChecked: groups.length,
       newProductsFound: totalNewProducts,
     });
 
     dailyNewProducts += totalNewProducts;
-    console.log(`[check] Concluido. ${totalNewProducts} novo(s).`);
+    console.log(`[check] Concluido. ${totalNewProducts} novo(s). Intervalo: ${currentPollInterval}ms`);
     return { totalNew: totalNewProducts, byPlatform };
   } finally {
     checkRunning = false;
@@ -275,7 +308,8 @@ async function runHistorySweep() {
     let totalSeen = 0;
 
     try {
-      const products = await platformModule.searchProducts(keyword, filters);
+      const searchFn = platformModule.searchProductsSweep || platformModule.searchProducts;
+      const products = await searchFn(keyword, filters);
 
       for (const product of products) {
         for (const { chatId } of users) {
@@ -302,10 +336,12 @@ function startPollingLoop() {
     } catch (err) {
       console.error('[poll] Erro:', err.message);
     }
-    pollTimeoutId = setTimeout(poll, POLL_INTERVAL_MS);
+    pollTimeoutId = setTimeout(poll, currentPollInterval);
   }
-  pollTimeoutId = setTimeout(poll, POLL_INTERVAL_MS);
-  console.log(`[bot] Polling iniciado (intervalo: ${POLL_INTERVAL_MS}ms).`);
+  pollTimeoutId = setTimeout(poll, currentPollInterval);
+  console.log(
+    `[bot] Polling iniciado (base: ${POLL_BASE_INTERVAL_MS}ms, batch: ${POLL_BATCH_SIZE}, max: ${POLL_MAX_INTERVAL_MS}ms).`,
+  );
 }
 
 async function main() {
@@ -320,37 +356,32 @@ async function main() {
   commands.register(bot);
   console.log('[bot] Comandos registrados.');
 
-  // Wire enjoeiApi alert callback to admin notifications
   enjoeiApi.setAlertCallback((msg) => notifyAdmin(msg));
 
-  // Sweep history to mark existing products as seen (prevents false notifications)
   await runHistorySweep();
 
-  // Startup summary
   const allKw = db.getAllUserKeywords();
   const groups = buildGroups(allKw);
-  await notifyAdmin(`Bot iniciado. Monitorando ${allKw.length} palavra(s)-chave em ${groups.length} grupo(s).`);
+  await notifyAdmin(
+    `Bot iniciado. Monitorando ${allKw.length} palavra(s)-chave em ${groups.length} grupo(s). Batch: ${POLL_BATCH_SIZE}, intervalo: ${POLL_BASE_INTERVAL_MS}ms.`,
+  );
 
-  // Start continuous polling
   startPollingLoop();
 
-  // Daily maintenance at 4 AM: purge old products + backup DB
   cron.schedule('0 4 * * *', () => {
     console.log('[cron] Manutencao diaria');
-    runMaintenance().catch(err => console.error('[cron] Erro manutencao:', err.message));
+    runMaintenance().catch((err) => console.error('[cron] Erro manutencao:', err.message));
   });
 
-  // Reset daily counter at midnight
   cron.schedule('0 0 * * *', () => {
     dailyNewProducts = 0;
   });
 
-  // Heartbeat every 6 hours
   cron.schedule('0 */6 * * *', () => {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
-    notifyAdmin(`Heartbeat: Bot rodando. Ultimo ciclo: ${timeStr}. ${dailyNewProducts} produto(s) novo(s) hoje.`)
-      .catch(err => console.error('[cron] Erro heartbeat:', err.message));
+    const cycleInfo = lastCheckTime ? `Ultimo ciclo: ${lastCheckTime}` : 'Nenhum ciclo realizado';
+    notifyAdmin(`Heartbeat: Bot rodando. ${cycleInfo}. ${dailyNewProducts} produto(s) novo(s) hoje.`).catch((err) =>
+      console.error('[cron] Erro heartbeat:', err.message),
+    );
   });
 
   console.log('[bot] Manutencao diaria agendada (4h). Heartbeat a cada 6h.');

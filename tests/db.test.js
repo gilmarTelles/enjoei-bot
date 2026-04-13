@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const db = require('../src/db');
 
-const TEST_DB = path.join(__dirname, '..', 'data', 'test_db.db');
+const TEST_DB = path.join(os.tmpdir(), 'enjoei-bot-test-db.db');
 
 beforeAll(() => {
   process.env.NODE_ENV = 'test';

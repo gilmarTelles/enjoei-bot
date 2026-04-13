@@ -2,39 +2,103 @@ const { randomUUID } = require('crypto');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const cache = require('./cache');
 
 const GRAPHQL_URL = 'https://enjusearch.enjoei.com.br/graphql-search-x';
 const QUERY_ID = 'c5faa5f85fb47bf0beaa97b67d8a9189';
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
-const PROXY_URL = process.env.PROXY_URL || '';
 
-// Location defaults (Enjoei uses these for search relevance)
+const PROXY_URL = process.env.PROXY_URL || '';
+const CURL_BIN = process.env.CURL_BIN || 'curl';
 const CITY = process.env.ENJOEI_CITY || 'sao-jose-dos-pinhais';
 const STATE = process.env.ENJOEI_STATE || 'pr';
 
+const CF_COOLDOWN_MS = parseInt(process.env.CF_COOLDOWN_MS, 10) || 300000;
+const CF_MAX_COOLDOWN_MS = parseInt(process.env.CF_MAX_COOLDOWN_MS, 10) || 3600000;
+const CF_ALERT_THROTTLE_MS = parseInt(process.env.CF_ALERT_THROTTLE_MS, 10) || 600000;
+const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS, 10) || 30000;
+const JITTER_MS = parseInt(process.env.REQUEST_JITTER_MS, 10) || 2000;
+const BROWSER_ID_ROTATE_MS = parseInt(process.env.BROWSER_ID_ROTATE_MS, 10) || 1800000;
+
+let cloudflareCooldownUntil = 0;
+let cloudflareBackoffMs = CF_COOLDOWN_MS;
+let lastCfAlertTime = 0;
+let cfBlockedGroupCount = 0;
+
 let alertCallback = null;
 
-function setAlertCallback(fn) { alertCallback = fn; }
+function setAlertCallback(fn) {
+  alertCallback = fn;
+}
 
-function alert(msg) {
+function throttledCfAlert(msg) {
+  const now = Date.now();
+  if (now - lastCfAlertTime < CF_ALERT_THROTTLE_MS) return;
+  lastCfAlertTime = now;
   if (alertCallback) alertCallback(msg).catch(() => {});
 }
 
+function isCloudflareCooldown() {
+  return Date.now() < cloudflareCooldownUntil;
+}
+
+function enterCloudflareCooldown() {
+  const now = Date.now();
+  cloudflareCooldownUntil = now + cloudflareBackoffMs;
+  cloudflareBackoffMs = Math.min(cloudflareBackoffMs * 2, CF_MAX_COOLDOWN_MS);
+  cfBlockedGroupCount++;
+  const retryAt = new Date(cloudflareCooldownUntil).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  throttledCfAlert(
+    `Cloudflare bloqueado. Cooldown: ${Math.round(cloudflareBackoffMs / 60000)} min. Proxima tentativa: ${retryAt}.`,
+  );
+}
+
+function resetCloudflareBackoff() {
+  if (cloudflareBackoffMs !== CF_COOLDOWN_MS) {
+    console.log('[enjoeiApi] Cloudflare backoff resetado.');
+  }
+  cloudflareBackoffMs = CF_COOLDOWN_MS;
+  cfBlockedGroupCount = 0;
+}
+
 let browserId = null;
+let browserIdCreatedAt = 0;
 
 function getBrowserId() {
-  if (browserId) return browserId;
+  const now = Date.now();
+  if (browserId && now - browserIdCreatedAt < BROWSER_ID_ROTATE_MS) return browserId;
+
+  if (browserId && now - browserIdCreatedAt >= BROWSER_ID_ROTATE_MS) {
+    console.log('[enjoeiApi] Rotating browser_id...');
+    browserId = null;
+  }
 
   const dataDir = path.join(__dirname, '..', 'data');
   const idFile = path.join(dataDir, 'browser_id.txt');
 
+  if (!browserId) {
+    browserId = `${randomUUID()}-${Date.now()}`;
+    browserIdCreatedAt = now;
+    try {
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+      fs.writeFileSync(idFile, browserId);
+    } catch (err) {
+      console.warn('[enjoeiApi] Could not persist browser_id:', err.message);
+    }
+    return browserId;
+  }
+
   try {
     browserId = fs.readFileSync(idFile, 'utf8').trim();
-    if (browserId) return browserId;
+    if (browserId) {
+      browserIdCreatedAt = now;
+      return browserId;
+    }
   } catch {}
 
   browserId = `${randomUUID()}-${Date.now()}`;
+  browserIdCreatedAt = now;
   try {
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(idFile, browserId);
@@ -46,11 +110,12 @@ function getBrowserId() {
 
 function buildHeaders() {
   return {
-    'Accept': '*/*',
+    Accept: '*/*',
     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Origin': 'https://www.enjoei.com.br',
-    'Referer': 'https://www.enjoei.com.br/',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+    Origin: 'https://www.enjoei.com.br',
+    Referer: 'https://www.enjoei.com.br/',
+    'User-Agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
     'sec-ch-ua': '"Google Chrome";v="135", "Chromium";v="135", "Not-A.Brand";v="8"',
     'sec-ch-ua-mobile': '?0',
     'sec-ch-ua-platform': '"macOS"',
@@ -60,36 +125,39 @@ function buildHeaders() {
   };
 }
 
-// Format a Date as Brazil timezone offset string: YYYY-MM-DDTHH:MM:SS-03:00
 function formatBrazilTimestamp(date) {
-  const utcMs = date.getTime();
-  const brMs = utcMs + (-3 * 60 * 60 * 1000); // UTC-3
-  const br = new Date(brMs);
-  const pad = n => String(n).padStart(2, '0');
-  return `${br.getUTCFullYear()}-${pad(br.getUTCMonth() + 1)}-${pad(br.getUTCDate())}T${pad(br.getUTCHours())}:${pad(br.getUTCMinutes())}:${pad(br.getUTCSeconds())}-03:00`;
+  const formatted = date.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+  const isoLike = formatted.replace(' ', 'T');
+  const offset = new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', timeZoneName: 'shortOffset' });
+  const match = offset.match(/GMT([+-]\d+)/);
+  const tzOffset = match ? match[1].replace(/^([+-])(\d)$/, '$10$2') : '-03';
+  return `${isoLike}${tzOffset.slice(0, 3)}:${tzOffset.slice(3) || '00'}`;
 }
 
-// Convert lp filter value to a last_published_at timestamp
 const LP_OFFSETS = {
+  '1h': 60 * 60 * 1000,
   '24h': 24 * 60 * 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
   '14d': 14 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
 };
 
-function buildSearchParams(term, filters, sinceTimestamp) {
+const LP_DEFAULT = '1h';
+const LP_DEFAULT_SWEEP = '24h';
+
+function buildSearchParams(term, filters, sinceTimestamp, useSweepDefault) {
   const params = new URLSearchParams();
   params.set('browser_id', getBrowserId());
   params.set('city', CITY);
   params.set('experienced_seller', 'true');
   params.set('first', '30');
 
-  // Time filter: explicit sinceTimestamp takes priority, then lp filter, default 24h
   if (sinceTimestamp) {
     params.set('last_published_at', formatBrazilTimestamp(new Date(sinceTimestamp)));
   } else {
-    const lp = (filters && filters.lp) || '24h';
-    const offsetMs = LP_OFFSETS[lp] || LP_OFFSETS['24h'];
+    const defaultLp = useSweepDefault ? LP_DEFAULT_SWEEP : LP_DEFAULT;
+    const lp = (filters && filters.lp) || defaultLp;
+    const offsetMs = LP_OFFSETS[lp] || LP_OFFSETS[defaultLp];
     params.set('last_published_at', formatBrazilTimestamp(new Date(Date.now() - offsetMs)));
   }
 
@@ -116,9 +184,7 @@ function normalizeProduct(node) {
 
   let price = '';
   if (node.price != null) {
-    const priceNum = typeof node.price === 'object'
-      ? (node.price.current || node.price.original || 0)
-      : node.price;
+    const priceNum = typeof node.price === 'object' ? node.price.current || node.price.original || 0 : node.price;
     const reais = typeof priceNum === 'number' ? priceNum : parseFloat(priceNum) || 0;
     price = `R$ ${reais.toFixed(2).replace('.', ',')}`;
   }
@@ -144,13 +210,31 @@ function normalizeProduct(node) {
   };
 }
 
-// Execute curl as a subprocess to avoid Node.js TLS fingerprinting by Cloudflare
+function getProxyUrl() {
+  if (!PROXY_URL) return null;
+
+  if (PROXY_URL.includes('_session-')) return PROXY_URL;
+
+  const sep = PROXY_URL.includes('@') ? '@' : ':';
+  const atIndex = PROXY_URL.lastIndexOf('@');
+  if (atIndex === -1) return PROXY_URL;
+
+  const credsAndProtocol = PROXY_URL.substring(0, atIndex);
+  const hostAndPort = PROXY_URL.substring(atIndex + 1);
+
+  const sessionStr = `_session-${randomUUID().replace(/-/g, '').substring(0, 8)}`;
+  const modifiedCreds = credsAndProtocol + sessionStr;
+
+  return `${modifiedCreds}@${hostAndPort}`;
+}
+
 function curlFetch(url, headers) {
   return new Promise((resolve, reject) => {
-    const args = ['-s', '-S', '--max-time', '8', '-k', '-w', '\n%{http_code}'];
+    const args = ['-s', '-S', '--max-time', '8', '-w', '\n%{http_code}'];
 
-    if (PROXY_URL) {
-      args.push('--proxy', PROXY_URL);
+    const proxyUrl = getProxyUrl();
+    if (proxyUrl) {
+      args.push('--proxy', proxyUrl);
     }
 
     for (const [key, value] of Object.entries(headers)) {
@@ -159,9 +243,9 @@ function curlFetch(url, headers) {
 
     args.push(url);
 
-    execFile('curl', args, { maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(CURL_BIN, args, { maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
-        return reject(new Error(`curl failed: ${err.message} ${stderr || ''}`));
+        return reject(new Error(`${CURL_BIN} failed: ${err.message} ${stderr || ''}`));
       }
 
       const lines = stdout.trimEnd().split('\n');
@@ -173,8 +257,24 @@ function curlFetch(url, headers) {
   });
 }
 
-async function fetchProducts(term, filters, sinceTimestamp) {
-  const params = buildSearchParams(term, filters, sinceTimestamp);
+async function fetchProducts(term, filters, sinceTimestamp, useSweepDefault) {
+  const cacheKey = `${term}||${JSON.stringify(filters || {})}||${sinceTimestamp || 0}||${useSweepDefault ? '1' : '0'}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    console.log(`[enjoeiApi] Cache hit for "${term}"`);
+    return cached;
+  }
+
+  if (isCloudflareCooldown()) {
+    console.log(`[enjoeiApi] Cloudflare cooldown ativo, pulando "${term}"`);
+    return [];
+  }
+
+  if (JITTER_MS > 0) {
+    await new Promise((r) => setTimeout(r, Math.random() * JITTER_MS));
+  }
+
+  const params = buildSearchParams(term, filters, sinceTimestamp, useSweepDefault);
   const url = `${GRAPHQL_URL}?${params.toString()}`;
   const headers = buildHeaders();
 
@@ -183,36 +283,35 @@ async function fetchProducts(term, filters, sinceTimestamp) {
       const response = await curlFetch(url, headers);
 
       if (response.status === 429) {
-        console.warn(`[enjoeiApi] Rate limited (429), waiting 5s...`);
-        alert(`Rate limit (429) ao buscar "${term}". Retry em 5s (tentativa ${attempt}/${MAX_RETRIES}).`);
-        await new Promise(r => setTimeout(r, 5000));
-        continue;
-      }
-
-      if (response.status === 403 || response.status === 503) {
-        if (response.body.includes('<html') || response.body.includes('cloudflare')) {
-          console.error(`[enjoeiApi] Cloudflare block detected (${response.status})`);
-          alert(`Cloudflare block (${response.status}) ao buscar "${term}" (tentativa ${attempt}/${MAX_RETRIES}).`);
-          if (attempt < MAX_RETRIES) {
-            await new Promise(r => setTimeout(r, RETRY_BASE_MS * attempt));
-            continue;
-          }
-          return [];
-        }
-      }
-
-      if (response.status < 200 || response.status >= 300) {
-        console.error(`[enjoeiApi] HTTP ${response.status} for "${term}"`);
+        console.warn(`[enjoeiApi] Rate limited (429) for "${term}"`);
         if (attempt < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, RETRY_BASE_MS * attempt));
+          await new Promise((r) => setTimeout(r, 5000 * attempt));
           continue;
         }
         return [];
       }
 
+      if (response.status === 403 || response.status === 503) {
+        if (response.body.includes('<html') || response.body.includes('cloudflare')) {
+          console.error(`[enjoeiApi] Cloudflare block (${response.status}) for "${term}"`);
+          enterCloudflareCooldown();
+          return [];
+        }
+      }
+
+      if (response.status < 200 || response.status >= 300) {
+        console.error(`[enjoeiApi] HTTP ${response.status} for "${term}" (attempt ${attempt}/${MAX_RETRIES})`);
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, RETRY_BASE_MS * attempt));
+          continue;
+        }
+        return [];
+      }
+
+      resetCloudflareBackoff();
+
       const json = JSON.parse(response.body);
 
-      // Check for GraphQL errors
       if (json.errors && json.errors.length > 0) {
         console.warn(`[enjoeiApi] GraphQL error for "${term}": ${json.errors[0].message}`);
         return [];
@@ -220,7 +319,6 @@ async function fetchProducts(term, filters, sinceTimestamp) {
 
       const edges = json?.data?.search?.products?.edges;
       if (!Array.isArray(edges)) {
-        // products can be null when no results for a time window — not an error
         if (json?.data?.search?.products === null) {
           return [];
         }
@@ -228,18 +326,28 @@ async function fetchProducts(term, filters, sinceTimestamp) {
         return [];
       }
 
-      return edges.map(edge => normalizeProduct(edge.node));
+      const products = edges.map((edge) => normalizeProduct(edge.node));
+      cache.set(cacheKey, products, CACHE_TTL_MS);
+      return products;
     } catch (err) {
       console.error(`[enjoeiApi] Attempt ${attempt} failed for "${term}": ${err.message}`);
       if (attempt < MAX_RETRIES) {
-        await new Promise(r => setTimeout(r, RETRY_BASE_MS * attempt));
+        await new Promise((r) => setTimeout(r, RETRY_BASE_MS * attempt));
       }
     }
   }
 
-  alert(`Todas as ${MAX_RETRIES} tentativas falharam para "${term}".`);
   console.error(`[enjoeiApi] All ${MAX_RETRIES} attempts failed for "${term}"`);
   return [];
 }
 
-module.exports = { fetchProducts, normalizeProduct, getBrowserId, buildSearchParams, setAlertCallback };
+cache.startCleanup(CACHE_TTL_MS > 0 ? CACHE_TTL_MS : 60000);
+
+module.exports = {
+  fetchProducts,
+  normalizeProduct,
+  getBrowserId,
+  buildSearchParams,
+  setAlertCallback,
+  isCloudflareCooldown,
+};

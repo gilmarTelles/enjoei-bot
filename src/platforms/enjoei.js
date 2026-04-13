@@ -1,3 +1,5 @@
+const { parseFilters } = require('../utils');
+
 const platformKey = 'enjoei';
 const platformName = 'Enjoei';
 
@@ -8,9 +10,8 @@ function buildSearchUrl(keyword, filters) {
   const params = new URLSearchParams();
   params.set('q', slug);
 
-  // Default: last 24h
   if (!filters || !filters.lp) {
-    params.set('lp', '24h');
+    params.set('lp', '1h');
   } else {
     params.set('lp', filters.lp);
   }
@@ -36,13 +37,8 @@ async function searchProductsSince(keyword, filters, sinceTimestamp) {
   return fetchProducts(keyword, filters, sinceTimestamp);
 }
 
-function parseFilters(filtersStr) {
-  if (!filtersStr) return {};
-  try {
-    return JSON.parse(filtersStr);
-  } catch {
-    return {};
-  }
+async function searchProductsSweep(keyword, filters) {
+  return fetchProducts(keyword, filters, null, true);
 }
 
 function buildFilterKeyboard(keywordRow) {
@@ -57,8 +53,8 @@ function buildFilterKeyboard(keywordRow) {
   const sortALabel = filters.sort === 'price_asc' ? '\u2705 Menor preco' : '\u2B1C Menor preco';
   const sortDLabel = filters.sort === 'price_desc' ? '\u2705 Maior preco' : '\u2B1C Maior preco';
 
-  // Last posted filter (lp). Default is 24h when not set.
-  const lpValue = filters.lp || '24h';
+  const lpValue = filters.lp || '1h';
+  const lp1hLabel = lpValue === '1h' ? '\u2705 1h' : '\u2B1C 1h';
   const lp24Label = lpValue === '24h' ? '\u2705 24h' : '\u2B1C 24h';
   const lp7dLabel = lpValue === '7d' ? '\u2705 7 dias' : '\u2B1C 7 dias';
   const lp14dLabel = lpValue === '14d' ? '\u2705 14 dias' : '\u2B1C 14 dias';
@@ -73,6 +69,7 @@ function buildFilterKeyboard(keywordRow) {
   return {
     inline_keyboard: [
       [
+        { text: lp1hLabel, callback_data: `f:${id}:lp:1h` },
         { text: lp24Label, callback_data: `f:${id}:lp:24h` },
         { text: lp7dLabel, callback_data: `f:${id}:lp:7d` },
         { text: lp14dLabel, callback_data: `f:${id}:lp:14d` },
@@ -102,9 +99,8 @@ function applyFilterToggle(filters, filterType, filterValue) {
 
   switch (filterType) {
     case 'lp':
-      // Toggle: if same value, reset to default (24h)
       if (updated.lp === filterValue) {
-        delete updated.lp; // reverts to default 24h
+        delete updated.lp;
       } else {
         updated.lp = filterValue;
       }
@@ -146,8 +142,8 @@ function applyFilterToggle(filters, filterType, filterValue) {
 function formatFiltersSummary(filters) {
   if (!filters || Object.keys(filters).length === 0) return '';
   const parts = [];
-  if (filters.lp && filters.lp !== '24h') {
-    const lpLabels = { '7d': '7 dias', '14d': '14 dias', '30d': '30 dias' };
+  if (filters.lp && filters.lp !== '1h') {
+    const lpLabels = { '24h': '24h', '7d': '7 dias', '14d': '14 dias', '30d': '30 dias' };
     parts.push(`periodo: ${lpLabels[filters.lp] || filters.lp}`);
   }
   if (filters.used) parts.push('usado');
@@ -166,6 +162,7 @@ module.exports = {
   buildSearchUrl,
   searchProducts,
   searchProductsSince,
+  searchProductsSweep,
   buildFilterKeyboard,
   applyFilterToggle,
   formatFiltersSummary,

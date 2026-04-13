@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-03-04: Admin health notifications via Telegram
+
+**Commit:** (pending)
+
+**Problem:** Important bot events (startup, shutdown, rate limits, Cloudflare blocks) only logged to console — invisible without SSH access.
+
+**Changes to `src/enjoeiApi.js`:**
+- Added `setAlertCallback(fn)` / `alert(msg)` mechanism for decoupled admin notifications
+- Alerts fire on: Cloudflare block (403/503), rate limit (429), proxy connection errors, all retries exhausted
+- Exported `setAlertCallback` in module.exports
+
+**Changes to `src/index.js`:**
+- Wired `enjoeiApi.setAlertCallback()` to `notifyAdmin()` after bot init
+- Added startup summary: keyword count + group count sent to admin after sweep
+- Added shutdown notification before exit (with try/catch to not block shutdown)
+- Added 6-hour heartbeat cron with last cycle time + daily new products count
+- Added midnight cron to reset `dailyNewProducts` counter
+- Tracks `dailyNewProducts` across polling cycles
+
+**Verified by:** `npm test` — all 193 tests pass (6 suites).
+
+---
+
+## 2026-03-04: Parallelize keyword polling + proxy support
+
+**Commit:** (pending)
+
+**Problem:** Bot polled 17+ keyword groups sequentially with 500ms delays (~11s per cycle). Also vulnerable to IP-based rate limiting/blocking from Enjoei.
+
+**Changes to `src/index.js`:**
+- Added `runWithConcurrency()` helper for parallel batch execution with configurable limit
+- Refactored `runCheck()` and `runHistorySweep()` to use concurrent batches
+- Removed `API_DELAY_MS` constant (replaced by concurrency limiting)
+- Added `MAX_CONCURRENT_SEARCHES` env var (default: 5)
+
+**Changes to `src/enjoeiApi.js`:**
+- Added optional proxy support via `PROXY_URL` env var
+- Uses undici `ProxyAgent` as fetch dispatcher (compatible with rotating proxy services)
+- Credentials are masked in startup log
+
+**New dependency:** `undici` (for ProxyAgent — needed since Node.js doesn't expose it directly)
+
+**Changes to `CLAUDE.md`:**
+- Documented `MAX_CONCURRENT_SEARCHES` and `PROXY_URL` env vars
+
+**Verified by:** `npm test` — all tests pass.
+
+---
+
 ## 2026-03-04: Fix product ID deduplication regression
 
 **Commit:** `812eeb3`

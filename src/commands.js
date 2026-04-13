@@ -1,9 +1,11 @@
 const db = require('./db');
 const { sendMessage } = require('./telegram');
 const { getPlatform, resolvePlatformAlias, DEFAULT_PLATFORM } = require('./platforms');
+const { parsePrice, parseFilters, sanitizeKeyword } = require('./utils');
 
 const KEYWORD_MIN_LEN = 2;
 const KEYWORD_MAX_LEN = 50;
+const MAX_KEYWORDS_PER_USER = 20;
 
 function getAllowedUsers() {
   return (process.env.ALLOWED_USERS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -27,31 +29,6 @@ function setCheckCallback(cb) {
 
 function setStatusData(data) {
   statusData = data;
-}
-
-function sanitizeKeyword(keyword) {
-  return keyword
-    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '') // smart double quotes
-    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, '') // smart single quotes
-    .replace(/[<>{}[\]|\\^~`]/g, '')                         // brackets and special chars
-    .replace(/\s+/g, ' ')                                     // collapse whitespace
-    .trim();
-}
-
-function parsePrice(priceStr) {
-  if (!priceStr) return null;
-  const cleaned = priceStr.replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? null : num;
-}
-
-function parseFilters(filtersStr) {
-  if (!filtersStr) return {};
-  try {
-    return JSON.parse(filtersStr);
-  } catch {
-    return {};
-  }
 }
 
 function formatFiltersSummary(filters, platform) {
@@ -170,8 +147,9 @@ function register(bot) {
             return;
           }
 
-          // Parse optional price filter: "nike air max < 200"
-          let keyword = arg;
+          const { keyword: rawKeyword, platform: addPlatform } = parsePlatformFromArg(arg);
+
+          let keyword = rawKeyword;
           let maxPrice = null;
           const priceMatch = keyword.match(/^(.+?)\s*<\s*(\d+(?:[.,]\d+)?)\s*$/);
           if (priceMatch) {
@@ -188,10 +166,22 @@ function register(bot) {
             await sendMessage(chatId, `Palavra-chave muito longa (maximo ${KEYWORD_MAX_LEN} caracteres).`);
             return;
           }
-          // Add keyword directly to Enjoei (single active platform)
-          const added = db.addKeyword(chatId, keyword, maxPrice, 'enjoei');
+          if (maxPrice !== null && maxPrice <= 0) {
+            await sendMessage(chatId, 'Preco maximo deve ser positivo.');
+            return;
+          }
+
+          const keywordCount = db.countKeywords(chatId);
+          if (keywordCount >= MAX_KEYWORDS_PER_USER) {
+            await sendMessage(chatId, `Limite de ${MAX_KEYWORDS_PER_USER} palavras-chave atingido. Remova alguma antes de adicionar.`);
+            return;
+          }
+
+          const added = db.addKeyword(chatId, keyword, maxPrice, addPlatform);
           if (added) {
-            let confirmMsg = `Palavra-chave adicionada: "${keyword.toLowerCase()}"`;
+            const platformModule = getPlatform(addPlatform);
+            const platformLabel = platformModule ? platformModule.platformName : addPlatform;
+            let confirmMsg = `Palavra-chave adicionada: "${keyword.toLowerCase()}" (${platformLabel})`;
             if (maxPrice) confirmMsg += ` (max R$ ${maxPrice.toFixed(2).replace('.', ',')})`;
             confirmMsg += '\nUse /filtros para configurar filtros de busca.';
             await sendMessage(chatId, confirmMsg);
@@ -343,7 +333,7 @@ function register(bot) {
       }
     } catch (err) {
       console.error(`[commands] Erro no comando ${command}:`, err.message);
-      await sendMessage(chatId, `Erro ao executar comando: ${err.message}`);
+      await sendMessage(chatId, 'Ocorreu um erro ao processar o comando.');
     }
   });
 
@@ -421,4 +411,4 @@ function register(bot) {
   });
 }
 
-module.exports = { register, setCheckCallback, setStatusData, parsePrice, parseFilters, formatFiltersSummary, buildFilterKeyboard, sanitizeKeyword };
+module.exports = { register, setCheckCallback, setStatusData, formatFiltersSummary, buildFilterKeyboard };
