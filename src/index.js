@@ -13,13 +13,16 @@ const { parsePrice, parseFilters } = require('./utils');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
-const POLL_BASE_INTERVAL_MS = parseInt(process.env.POLL_BASE_INTERVAL_MS, 10) || 5000;
-const POLL_MAX_INTERVAL_MS = parseInt(process.env.POLL_MAX_INTERVAL_MS, 10) || 30000;
-const POLL_BATCH_SIZE = parseInt(process.env.POLL_BATCH_SIZE, 10) || 4;
-const POLL_IDLE_SLOWDOWN_CYCLES = parseInt(process.env.POLL_IDLE_SLOWDOWN_CYCLES, 10) || 5;
+const POLL_TICK_MS = parseInt(process.env.POLL_TICK_MS, 10) || 5000;
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_SEARCHES, 10) || 5;
 const PURGE_DAYS = 7;
-const STALE_THRESHOLD = 5;
+
+function getGroupIntervalMs(emptyCount) {
+  if (emptyCount < 20) return 15000;
+  if (emptyCount < 50) return 30000;
+  if (emptyCount < 100) return 60000;
+  return 300000;
+}
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -45,13 +48,11 @@ if (!TELEGRAM_BOT_TOKEN) {
 }
 
 const groupEmptyCounts = new Map();
+const groupNextCheck = new Map();
 let checkRunning = false;
 let pollTimeoutId = null;
 let dailyNewProducts = 0;
 let lastCheckTime = null;
-let currentPollInterval = POLL_BASE_INTERVAL_MS;
-let consecutiveEmptyCycles = 0;
-let batchIndex = 0;
 
 async function notifyAdmin(text) {
   if (!ADMIN_CHAT_ID) return;
@@ -182,26 +183,24 @@ async function runCheck() {
       return { totalNew: 0, byPlatform: {} };
     }
 
-    const startIdx = (batchIndex * POLL_BATCH_SIZE) % allGroups.length;
-    const isLastBatch = startIdx + POLL_BATCH_SIZE >= allGroups.length;
-    let groups;
-    if (startIdx + POLL_BATCH_SIZE >= allGroups.length) {
-      groups = allGroups.slice(startIdx);
-    } else {
-      groups = allGroups.slice(startIdx, startIdx + POLL_BATCH_SIZE);
-    }
-    batchIndex++;
+    const now = Date.now();
+    const dueGroups = allGroups.filter(({ keyword, filters, platform }) => {
+      const groupKey = `${platform}||${keyword}||${filters ? JSON.stringify(filters) : ''}`;
+      const next = groupNextCheck.get(groupKey);
+      return !next || next <= now;
+    });
 
-    const batchLabel =
-      allGroups.length > POLL_BATCH_SIZE ? ` (batch ${groups.length}/${allGroups.length}, offset ${startIdx})` : '';
-    console.log(`[check] Verificando ${groups.length} grupo(s)${batchLabel}...`);
+    if (dueGroups.length === 0) {
+      return { totalNew: 0, byPlatform: {} };
+    }
+
+    console.log(`[check] Verificando ${dueGroups.length} grupo(s) de ${allGroups.length} total...`);
 
     let totalNewProducts = 0;
     const byPlatform = {};
-    let hadError = false;
     let cfSkipped = 0;
 
-    await runWithConcurrency(groups, MAX_CONCURRENT, async ({ keyword, filters, platform, users }) => {
+    await runWithConcurrency(dueGroups, MAX_CONCURRENT, async ({ keyword, filters, platform, users }) => {
       const platformModule = getPlatform(platform);
       const platformLabel = platformModule ? platformModule.platformName : platform;
 
@@ -225,14 +224,11 @@ async function runCheck() {
 
         if (products.length > 0) {
           groupEmptyCounts.delete(groupKey);
+          groupNextCheck.set(groupKey, now + getGroupIntervalMs(0));
         } else {
-          groupEmptyCounts.set(groupKey, (groupEmptyCounts.get(groupKey) || 0) + 1);
-          const count = groupEmptyCounts.get(groupKey);
-          if (count >= STALE_THRESHOLD) {
-            await notifyAdmin(
-              `ALERTA: "${keyword}" [${platformLabel}] sem resultados ha ${count} verificacoes consecutivas.`,
-            );
-          }
+          const count = (groupEmptyCounts.get(groupKey) || 0) + 1;
+          groupEmptyCounts.set(groupKey, count);
+          groupNextCheck.set(groupKey, now + getGroupIntervalMs(count));
         }
 
         const newCount = await processProducts(products, keyword, platform, users);
@@ -240,7 +236,6 @@ async function runCheck() {
         if (newCount > 0) byPlatform[platform] = (byPlatform[platform] || 0) + newCount;
         metrics.recordSearch(keyword, platform, products.length, newCount);
       } catch (err) {
-        hadError = true;
         console.error(`[check] Erro em "${keyword}" [${platformLabel}]:`, err.message);
         await notifyAdmin(`Erro ao buscar "${keyword}" [${platformLabel}]: ${err.message}`);
         metrics.recordSearch(keyword, platform, 0, 0, err.message);
@@ -252,38 +247,17 @@ async function runCheck() {
       console.log(`[check] ${cfSkipped} grupo(s) pulado(s) por Cloudflare cooldown.`);
     }
 
-    if (!hadError && groups.length > 0 && [...groupEmptyCounts.values()].every((c) => c >= STALE_THRESHOLD)) {
-      await notifyAdmin(
-        `ALERTA: Todas as buscas sem resultados ha ${STALE_THRESHOLD}+ verificacoes. A API pode ter mudado!`,
-      );
-    }
-
-    if (totalNewProducts > 0) {
-      consecutiveEmptyCycles = 0;
-      currentPollInterval = POLL_BASE_INTERVAL_MS;
-    } else {
-      consecutiveEmptyCycles++;
-      if (consecutiveEmptyCycles >= POLL_IDLE_SLOWDOWN_CYCLES) {
-        currentPollInterval = Math.min(currentPollInterval + POLL_BASE_INTERVAL_MS, POLL_MAX_INTERVAL_MS);
-        if (currentPollInterval < POLL_MAX_INTERVAL_MS || consecutiveEmptyCycles === POLL_IDLE_SLOWDOWN_CYCLES) {
-          console.log(
-            `[check] Intervalo adaptativo: ${currentPollInterval}ms (ciclos vazios: ${consecutiveEmptyCycles})`,
-          );
-        }
-      }
-    }
-
-    const now = new Date();
-    lastCheckTime = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const nowBR = new Date();
+    lastCheckTime = nowBR.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     commands.setStatusData({
       lastCheckTime,
-      keywordsChecked: groups.length,
+      keywordsChecked: dueGroups.length,
       newProductsFound: totalNewProducts,
     });
 
     dailyNewProducts += totalNewProducts;
     metrics.recordPollCycle(totalNewProducts > 0);
-    console.log(`[check] Concluido. ${totalNewProducts} novo(s). Intervalo: ${currentPollInterval}ms`);
+    console.log(`[check] Concluido. ${totalNewProducts} novo(s).`);
     return { totalNew: totalNewProducts, byPlatform };
   } finally {
     checkRunning = false;
@@ -341,12 +315,10 @@ function startPollingLoop() {
     } catch (err) {
       console.error('[poll] Erro:', err.message);
     }
-    pollTimeoutId = setTimeout(poll, currentPollInterval);
+    pollTimeoutId = setTimeout(poll, POLL_TICK_MS);
   }
-  pollTimeoutId = setTimeout(poll, currentPollInterval);
-  console.log(
-    `[bot] Polling iniciado (base: ${POLL_BASE_INTERVAL_MS}ms, batch: ${POLL_BATCH_SIZE}, max: ${POLL_MAX_INTERVAL_MS}ms).`,
-  );
+  pollTimeoutId = setTimeout(poll, POLL_TICK_MS);
+  console.log(`[bot] Polling iniciado (tick: ${POLL_TICK_MS}ms, concorrencia: ${MAX_CONCURRENT}).`);
 }
 
 async function main() {
@@ -361,8 +333,7 @@ async function main() {
   commands.setRuntimeStateGetter(() => ({
     allGroups: buildGroups(db.getAllUserKeywords()),
     groupEmptyCounts,
-    currentPollInterval,
-    batchIndex,
+    groupNextCheck,
   }));
   commands.register(bot);
   console.log('[bot] Comandos registrados.');
@@ -374,7 +345,7 @@ async function main() {
   const allKw = db.getAllUserKeywords();
   const groups = buildGroups(allKw);
   await notifyAdmin(
-    `Bot iniciado. Monitorando ${allKw.length} palavra(s)-chave em ${groups.length} grupo(s). Batch: ${POLL_BATCH_SIZE}, intervalo: ${POLL_BASE_INTERVAL_MS}ms.`,
+    `Bot iniciado. Monitorando ${allKw.length} palavra(s)-chave em ${groups.length} grupo(s). Tick: ${POLL_TICK_MS}ms.`,
   );
 
   startPollingLoop();

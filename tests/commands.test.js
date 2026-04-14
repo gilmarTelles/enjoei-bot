@@ -1,6 +1,6 @@
 // Set ALLOWED_USERS before requiring commands
-process.env.ALLOWED_USERS = '6397962194,7653440251';
-process.env.ADMIN_CHAT_ID = '6397962194';
+process.env.ALLOWED_USERS = '111111111,222222222';
+process.env.ADMIN_CHAT_ID = '111111111';
 
 const db = require('../src/db');
 
@@ -67,12 +67,13 @@ beforeEach(() => {
   instance.exec('DELETE FROM seen_products');
   instance.exec('DELETE FROM user_settings');
   telegram.sendMessage.mockClear();
+  commands.resetRateLimits();
 });
 
 const commands = require('../src/commands');
 
 describe('Commands', () => {
-  const ALLOWED = '6397962194';
+  const ALLOWED = '111111111';
   const BLOCKED = '9999999999';
 
   test('usuario nao autorizado recebe acesso negado', async () => {
@@ -291,7 +292,7 @@ describe('Commands', () => {
 });
 
 describe('/parar and /retomar commands', () => {
-  const ALLOWED = '6397962194';
+  const ALLOWED = '111111111';
 
   test('/parar envia confirmacao e pausa', async () => {
     const bot = createMockBot();
@@ -338,7 +339,7 @@ describe('/parar and /retomar commands', () => {
 });
 
 describe('/filtros command', () => {
-  const ALLOWED = '6397962194';
+  const ALLOWED = '111111111';
 
   test('/filtros sem keywords mostra mensagem', async () => {
     const bot = createMockBot();
@@ -397,7 +398,7 @@ describe('/filtros command', () => {
 });
 
 describe('callback_query handler', () => {
-  const ALLOWED = '6397962194';
+  const ALLOWED = '111111111';
   const BLOCKED = '9999999999';
 
   test('usuario nao autorizado no callback recebe acesso negado', async () => {
@@ -750,8 +751,8 @@ describe('buildFilterKeyboard', () => {
 });
 
 describe('Dashboard commands', () => {
-  const ADMIN = '6397962194';
-  const USER = '7653440251';
+  const ADMIN = '111111111';
+  const USER = '222222222';
 
   beforeEach(() => {
     const metrics = require('../src/metrics');
@@ -861,7 +862,7 @@ describe('Dashboard commands', () => {
     await bot.simulate(ADMIN, '/config');
     const msg = telegram.sendMessage.mock.calls[0][1];
     expect(msg).toContain('Configuracao');
-    expect(msg).toContain('Poll base');
+    expect(msg).toContain('Poll tick');
     expect(msg).toContain('Proxy');
   });
 

@@ -8,6 +8,30 @@ const enjoeiApi = require('./enjoeiApi');
 const KEYWORD_MIN_LEN = 2;
 const KEYWORD_MAX_LEN = 50;
 const MAX_KEYWORDS_PER_USER = 20;
+const RATE_LIMIT_WINDOW_MS = 10000;
+const RATE_LIMIT_MAX_REQUESTS = 5;
+
+const rateLimitMap = new Map();
+
+function checkRateLimit(chatId) {
+  const now = Date.now();
+  let entry = rateLimitMap.get(chatId);
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    entry = { windowStart: now, count: 0 };
+    rateLimitMap.set(chatId, entry);
+  }
+  entry.count++;
+  if (entry.count > RATE_LIMIT_MAX_REQUESTS) {
+    return false;
+  }
+  if (rateLimitMap.size > 10000) {
+    const cutoff = now - RATE_LIMIT_WINDOW_MS;
+    for (const [key, val] of rateLimitMap) {
+      if (val.windowStart < cutoff) rateLimitMap.delete(key);
+    }
+  }
+  return true;
+}
 
 function getAllowedUsers() {
   return (process.env.ALLOWED_USERS || '')
@@ -153,6 +177,11 @@ function register(bot) {
 
     if (!isAllowed(msg)) {
       await sendMessage(chatId, 'Acesso negado.');
+      return;
+    }
+
+    if (!checkRateLimit(chatId)) {
+      await sendMessage(chatId, 'Muitas requisicoes. Aguarde alguns segundos e tente novamente.');
       return;
     }
 
@@ -436,7 +465,7 @@ function register(bot) {
             `Cloudflare: ${cfLabel}${cfExtra}`,
             `API sucesso: ${health.apiSuccessRate !== null ? health.apiSuccessRate + '%' : 'N/A'}`,
             `Tempo medio: ${health.avgResponseTime !== null ? health.avgResponseTime + 'ms' : 'N/A'}`,
-            `Poll: ${rt.currentPollInterval || '?'}ms (batch ${rt.batchIndex || '?'})`,
+            `Poll: tick ${process.env.POLL_TICK_MS || 5000}ms | grupos: ${rt.allGroups ? rt.allGroups.length : '?'}`,
             `Memoria: ${formatBytes(mem.heapUsed)}`,
             `DB: ${formatBytes(dbSize)}`,
             `Ultimo erro: ${health.lastError || 'nenhum'}${health.lastErrorTime ? ' (' + health.lastErrorTime + ')' : ''}`,
@@ -482,9 +511,7 @@ function register(bot) {
           const lines = [
             '*Configuracao do Bot*',
             '',
-            `Poll base: ${process.env.POLL_BASE_INTERVAL_MS || 5000}ms`,
-            `Poll max: ${process.env.POLL_MAX_INTERVAL_MS || 30000}ms`,
-            `Batch: ${process.env.POLL_BATCH_SIZE || 4}`,
+            `Poll tick: ${process.env.POLL_TICK_MS || 5000}ms`,
             `Concorrencia: ${process.env.MAX_CONCURRENT_SEARCHES || 5}`,
             `Jitter: ${process.env.REQUEST_JITTER_MS || 2000}ms`,
             `Cache TTL: ${process.env.CACHE_TTL_MS || 30000}ms`,
@@ -552,6 +579,11 @@ function register(bot) {
 
     if (!isAllowedChat(chatId)) {
       await bot.answerCallbackQuery(query.id, { text: 'Acesso negado.' });
+      return;
+    }
+
+    if (!checkRateLimit(chatId)) {
+      await bot.answerCallbackQuery(query.id, { text: 'Muitas requisicoes. Aguarde alguns segundos.' });
       return;
     }
 
@@ -625,4 +657,5 @@ module.exports = {
   setRuntimeStateGetter,
   formatFiltersSummary,
   buildFilterKeyboard,
+  resetRateLimits: () => rateLimitMap.clear(),
 };
