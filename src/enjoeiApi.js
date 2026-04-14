@@ -1,6 +1,7 @@
 const { randomUUID } = require('crypto');
 const { execFile } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const cache = require('./cache');
 const metrics = require('./metrics');
@@ -12,19 +13,23 @@ const RETRY_BASE_MS = 1000;
 
 const PROXY_URL = process.env.PROXY_URL || '';
 
-const ALLOWED_CURL_BINS = ['/usr/bin/curl', '/usr/local/bin/curl', '/opt/homebrew/bin/curl', '/snap/bin/curl'];
-
 function resolveCurlBin() {
   const envBin = process.env.CURL_BIN;
   if (envBin) {
     const resolved = path.resolve(envBin);
-    if (!ALLOWED_CURL_BINS.includes(resolved)) {
-      console.error(`[enjoeiApi] CURL_BIN "${resolved}" not in allowlist. Falling back to /usr/bin/curl.`);
-      return '/usr/bin/curl';
-    }
-    return resolved;
+    if (fs.existsSync(resolved)) return resolved;
+    console.error(`[enjoeiApi] CURL_BIN "${resolved}" not found. Falling back to auto-detect.`);
   }
-  for (const candidate of ALLOWED_CURL_BINS) {
+  const candidates = [
+    path.join(os.homedir(), 'bin', 'curl_chrome116'),
+    '/usr/local/bin/curl_chrome116',
+    '/usr/bin/curl-impersonate-chrome',
+    '/usr/bin/curl',
+    '/usr/local/bin/curl',
+    '/opt/homebrew/bin/curl',
+    '/snap/bin/curl',
+  ];
+  for (const candidate of candidates) {
     try {
       if (fs.existsSync(candidate)) return candidate;
     } catch {}
