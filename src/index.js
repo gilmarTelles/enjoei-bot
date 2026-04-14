@@ -8,6 +8,7 @@ const { notifyNewProducts } = require('./notifier');
 const { getPlatform, DEFAULT_PLATFORM } = require('./platforms');
 const { filterByRelevance } = require('./relevanceFilter');
 const enjoeiApi = require('./enjoeiApi');
+const metrics = require('./metrics');
 const { parsePrice, parseFilters } = require('./utils');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -237,10 +238,13 @@ async function runCheck() {
         const newCount = await processProducts(products, keyword, platform, users);
         totalNewProducts += newCount;
         if (newCount > 0) byPlatform[platform] = (byPlatform[platform] || 0) + newCount;
+        metrics.recordSearch(keyword, platform, products.length, newCount);
       } catch (err) {
         hadError = true;
         console.error(`[check] Erro em "${keyword}" [${platformLabel}]:`, err.message);
         await notifyAdmin(`Erro ao buscar "${keyword}" [${platformLabel}]: ${err.message}`);
+        metrics.recordSearch(keyword, platform, 0, 0, err.message);
+        metrics.recordError(err.message);
       }
     });
 
@@ -278,6 +282,7 @@ async function runCheck() {
     });
 
     dailyNewProducts += totalNewProducts;
+    metrics.recordPollCycle(totalNewProducts > 0);
     console.log(`[check] Concluido. ${totalNewProducts} novo(s). Intervalo: ${currentPollInterval}ms`);
     return { totalNew: totalNewProducts, byPlatform };
   } finally {
@@ -353,6 +358,12 @@ async function main() {
   const bot = telegram.init(TELEGRAM_BOT_TOKEN);
 
   commands.setCheckCallback(runCheck);
+  commands.setRuntimeStateGetter(() => ({
+    allGroups: buildGroups(db.getAllUserKeywords()),
+    groupEmptyCounts,
+    currentPollInterval,
+    batchIndex,
+  }));
   commands.register(bot);
   console.log('[bot] Comandos registrados.');
 

@@ -13,7 +13,9 @@ beforeAll(() => {
 afterAll(() => {
   const instance = db.getDb();
   if (instance) instance.close();
-  try { fs.unlinkSync(TEST_DB); } catch {};
+  try {
+    fs.unlinkSync(TEST_DB);
+  } catch {}
 });
 
 beforeEach(() => {
@@ -21,7 +23,6 @@ beforeEach(() => {
   instance.exec('DELETE FROM keywords');
   instance.exec('DELETE FROM seen_products');
   instance.exec('DELETE FROM user_settings');
-
 });
 
 describe('Keywords', () => {
@@ -48,9 +49,12 @@ describe('Keywords', () => {
     db.addKeyword('user1', 'adidas');
     db.addKeyword('user2', 'puma');
 
-    const u1 = db.listKeywords('user1').map(k => k.keyword).sort();
+    const u1 = db
+      .listKeywords('user1')
+      .map((k) => k.keyword)
+      .sort();
     expect(u1).toEqual(['adidas', 'nike']);
-    expect(db.listKeywords('user2').map(k => k.keyword)).toEqual(['puma']);
+    expect(db.listKeywords('user2').map((k) => k.keyword)).toEqual(['puma']);
   });
 
   test('remover palavra-chave', () => {
@@ -71,7 +75,7 @@ describe('Keywords', () => {
     db.removeKeyword('user1', 'nike');
 
     expect(db.listKeywords('user1')).toEqual([]);
-    expect(db.listKeywords('user2').map(k => k.keyword)).toEqual(['nike']);
+    expect(db.listKeywords('user2').map((k) => k.keyword)).toEqual(['nike']);
   });
 
   test('adicionar com max_price', () => {
@@ -140,7 +144,7 @@ describe('getAllUserKeywords', () => {
 
     const all = db.getAllUserKeywords();
     expect(all).toHaveLength(3);
-    const nikeUser1 = all.find(k => k.chat_id === 'user1' && k.keyword === 'nike');
+    const nikeUser1 = all.find((k) => k.chat_id === 'user1' && k.keyword === 'nike');
     expect(nikeUser1.max_price).toBe(150);
     expect(nikeUser1.platform).toBe('ml');
     expect(nikeUser1).toHaveProperty('id');
@@ -284,9 +288,11 @@ describe('countKeywords', () => {
 describe('purgeOldProducts', () => {
   test('remover produtos mais antigos que N dias', () => {
     const instance = db.getDb();
-    instance.prepare(
-      "INSERT INTO seen_products (product_id, keyword, chat_id, title, price, url, first_seen_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now', '-10 days'))"
-    ).run('old-product', 'nike', 'user1', 'Old', 'R$ 10', 'url');
+    instance
+      .prepare(
+        "INSERT INTO seen_products (product_id, keyword, chat_id, title, price, url, first_seen_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now', '-10 days'))",
+      )
+      .run('old-product', 'nike', 'user1', 'Old', 'R$ 10', 'url');
     db.markProductSeen({ id: 'new-product', title: 'New', price: 'R$ 20', url: 'url2' }, 'nike', 'user1');
 
     const purged = db.purgeOldProducts(7);
@@ -316,5 +322,82 @@ describe('setPaused / isPaused', () => {
     db.setPaused('user1', true);
     expect(db.isPaused('user1')).toBe(true);
     expect(db.isPaused('user2')).toBe(false);
+  });
+});
+
+describe('getRecentProducts', () => {
+  test('retorna produtos recentes do usuario', () => {
+    db.markProductSeen({ id: 'p1', title: 'Nike Air', price: 'R$ 100', url: 'url1' }, 'nike', 'user1');
+    db.markProductSeen({ id: 'p2', title: 'Adidas', price: 'R$ 200', url: 'url2' }, 'adidas', 'user1');
+    db.markProductSeen({ id: 'p3', title: 'Puma', price: 'R$ 150', url: 'url3' }, 'puma', 'user2');
+
+    const recent = db.getRecentProducts('user1', 10);
+    expect(recent).toHaveLength(2);
+    expect(recent[0].title).toBe('Nike Air');
+    expect(recent[1].title).toBe('Adidas');
+  });
+
+  test('respeita o limite', () => {
+    for (let i = 0; i < 5; i++) {
+      db.markProductSeen({ id: `p${i}`, title: `Product ${i}`, price: 'R$ 10', url: 'url' }, 'test', 'user1');
+    }
+    const recent = db.getRecentProducts('user1', 3);
+    expect(recent).toHaveLength(3);
+  });
+
+  test('retorna vazio para usuario sem produtos', () => {
+    expect(db.getRecentProducts('user1', 10)).toEqual([]);
+  });
+});
+
+describe('getProductsCountSince', () => {
+  test('conta produtos recentes do usuario', () => {
+    db.markProductSeen({ id: 'p1', title: 'Nike', price: 'R$ 100', url: 'url1' }, 'nike', 'user1');
+    db.markProductSeen({ id: 'p2', title: 'Adidas', price: 'R$ 200', url: 'url2' }, 'adidas', 'user1');
+
+    expect(db.getProductsCountSince('user1', '-1 day')).toBe(2);
+  });
+
+  test('conta todos os produtos quando chatId e null', () => {
+    db.markProductSeen({ id: 'p1', title: 'Nike', price: 'R$ 100', url: 'url1' }, 'nike', 'user1');
+    db.markProductSeen({ id: 'p2', title: 'Adidas', price: 'R$ 200', url: 'url2' }, 'adidas', 'user2');
+
+    expect(db.getProductsCountSince(null, '-1 day')).toBe(2);
+  });
+
+  test('retorna 0 para sinceExpr invalido', () => {
+    db.markProductSeen({ id: 'p1', title: 'Nike', price: 'R$ 100', url: 'url1' }, 'nike', 'user1');
+    expect(db.getProductsCountSince('user1', '; DROP TABLE --')).toBe(0);
+  });
+});
+
+describe('getTotalProductsCount', () => {
+  test('conta total de produtos do usuario', () => {
+    db.markProductSeen({ id: 'p1', title: 'Nike', price: 'R$ 100', url: 'url1' }, 'nike', 'user1');
+    db.markProductSeen({ id: 'p2', title: 'Adidas', price: 'R$ 200', url: 'url2' }, 'adidas', 'user1');
+    db.markProductSeen({ id: 'p3', title: 'Puma', price: 'R$ 150', url: 'url3' }, 'puma', 'user2');
+
+    expect(db.getTotalProductsCount('user1')).toBe(2);
+    expect(db.getTotalProductsCount(null)).toBe(3);
+  });
+});
+
+describe('getProductsCountByKeyword', () => {
+  test('agrupa contagem por keyword', () => {
+    db.markProductSeen({ id: 'p1', title: 'Nike', price: 'R$ 100', url: 'url1' }, 'nike', 'user1');
+    db.markProductSeen({ id: 'p2', title: 'Nike 2', price: 'R$ 200', url: 'url2' }, 'nike', 'user1');
+    db.markProductSeen({ id: 'p3', title: 'Adidas', price: 'R$ 150', url: 'url3' }, 'adidas', 'user1');
+
+    const counts = db.getProductsCountByKeyword('user1');
+    expect(counts).toHaveLength(2);
+    const nike = counts.find((c) => c.keyword === 'nike');
+    expect(nike.cnt).toBe(2);
+  });
+});
+
+describe('getDbSize', () => {
+  test('retorna tamanho positivo do banco', () => {
+    const size = db.getDbSize();
+    expect(size).toBeGreaterThan(0);
   });
 });

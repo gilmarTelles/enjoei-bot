@@ -147,7 +147,12 @@ function init(customDbPath) {
 function addKeyword(chatId, keyword, maxPrice, platform = 'enjoei') {
   const normalized = keyword.toLowerCase().trim();
   try {
-    db.prepare('INSERT INTO keywords (chat_id, keyword, max_price, platform) VALUES (?, ?, ?, ?)').run(chatId, normalized, maxPrice || null, platform);
+    db.prepare('INSERT INTO keywords (chat_id, keyword, max_price, platform) VALUES (?, ?, ?, ?)').run(
+      chatId,
+      normalized,
+      maxPrice || null,
+      platform,
+    );
     return true;
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') return false;
@@ -158,7 +163,9 @@ function addKeyword(chatId, keyword, maxPrice, platform = 'enjoei') {
 function removeKeyword(chatId, keyword, platform) {
   const normalized = keyword.toLowerCase().trim();
   if (platform) {
-    const result = db.prepare('DELETE FROM keywords WHERE chat_id = ? AND keyword = ? AND platform = ?').run(chatId, normalized, platform);
+    const result = db
+      .prepare('DELETE FROM keywords WHERE chat_id = ? AND keyword = ? AND platform = ?')
+      .run(chatId, normalized, platform);
     return result.changes > 0;
   }
   const result = db.prepare('DELETE FROM keywords WHERE chat_id = ? AND keyword = ?').run(chatId, normalized);
@@ -166,15 +173,23 @@ function removeKeyword(chatId, keyword, platform) {
 }
 
 function listKeywords(chatId) {
-  return db.prepare('SELECT keyword, max_price, filters, platform FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
+  return db
+    .prepare('SELECT keyword, max_price, filters, platform FROM keywords WHERE chat_id = ? ORDER BY created_at')
+    .all(chatId);
 }
 
 function listKeywordsWithId(chatId) {
-  return db.prepare('SELECT id, keyword, max_price, filters, platform FROM keywords WHERE chat_id = ? ORDER BY created_at').all(chatId);
+  return db
+    .prepare('SELECT id, keyword, max_price, filters, platform FROM keywords WHERE chat_id = ? ORDER BY created_at')
+    .all(chatId);
 }
 
 function getKeywordByIdAndChat(id, chatId) {
-  return db.prepare('SELECT id, keyword, max_price, filters, platform FROM keywords WHERE id = ? AND chat_id = ?').get(id, chatId) || null;
+  return (
+    db
+      .prepare('SELECT id, keyword, max_price, filters, platform FROM keywords WHERE id = ? AND chat_id = ?')
+      .get(id, chatId) || null
+  );
 }
 
 function updateFilters(id, filtersJson) {
@@ -186,14 +201,16 @@ function getAllUserKeywords() {
 }
 
 function isProductSeen(productId, keyword, chatId, platform = 'enjoei') {
-  const row = db.prepare('SELECT 1 FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?').get(productId, keyword, chatId, platform);
+  const row = db
+    .prepare('SELECT 1 FROM seen_products WHERE product_id = ? AND keyword = ? AND chat_id = ? AND platform = ?')
+    .get(productId, keyword, chatId, platform);
   return !!row;
 }
 
 function markProductSeen(product, keyword, chatId, platform = 'enjoei') {
   try {
     db.prepare(
-      'INSERT INTO seen_products (product_id, keyword, chat_id, title, price, url, platform) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO seen_products (product_id, keyword, chat_id, title, price, url, platform) VALUES (?, ?, ?, ?, ?, ?, ?)',
     ).run(product.id, keyword, chatId, product.title, product.price, product.url, platform);
   } catch (err) {
     if (err.code !== 'SQLITE_CONSTRAINT_UNIQUE') throw err;
@@ -206,9 +223,9 @@ function countKeywords(chatId) {
 }
 
 function purgeOldProducts(days) {
-  const result = db.prepare(
-    "DELETE FROM seen_products WHERE first_seen_at < datetime('now', '-' || ? || ' days')"
-  ).run(days);
+  const result = db
+    .prepare("DELETE FROM seen_products WHERE first_seen_at < datetime('now', '-' || ? || ' days')")
+    .run(days);
   return result.changes;
 }
 
@@ -227,14 +244,77 @@ function isPaused(chatId) {
   return row ? row.paused === 1 : false;
 }
 
+function getRecentProducts(chatId, limit) {
+  return db
+    .prepare(
+      'SELECT title, price, keyword, first_seen_at FROM seen_products WHERE chat_id = ? ORDER BY first_seen_at DESC LIMIT ?',
+    )
+    .all(chatId, limit || 10);
+}
+
+function getProductsCountSince(chatId, sinceExpr) {
+  const ALLOWED = ['-1 day', '-7 days', '-30 days', '-1 hour'];
+  if (!ALLOWED.includes(sinceExpr)) return 0;
+  if (chatId) {
+    const row = db
+      .prepare(`SELECT COUNT(*) AS cnt FROM seen_products WHERE chat_id = ? AND first_seen_at >= datetime('now', ?)`)
+      .get(chatId, sinceExpr);
+    return row.cnt;
+  }
+  const row = db
+    .prepare(`SELECT COUNT(*) AS cnt FROM seen_products WHERE first_seen_at >= datetime('now', ?)`)
+    .get(sinceExpr);
+  return row.cnt;
+}
+
+function getTotalProductsCount(chatId) {
+  if (chatId) {
+    const row = db.prepare('SELECT COUNT(*) AS cnt FROM seen_products WHERE chat_id = ?').get(chatId);
+    return row.cnt;
+  }
+  const row = db.prepare('SELECT COUNT(*) AS cnt FROM seen_products').get();
+  return row.cnt;
+}
+
+function getProductsCountByKeyword(chatId) {
+  return db
+    .prepare('SELECT keyword, COUNT(*) AS cnt FROM seen_products WHERE chat_id = ? GROUP BY keyword ORDER BY cnt DESC')
+    .all(chatId);
+}
+
+function getDbSize() {
+  try {
+    const stats = fs.statSync(activeDbPath);
+    return stats.size;
+  } catch {
+    return 0;
+  }
+}
+
 function getDb() {
   return db;
 }
 
 module.exports = {
-  init, addKeyword, removeKeyword, listKeywords, listKeywordsWithId,
-  getKeywordByIdAndChat, updateFilters, getAllUserKeywords,
-  isProductSeen, markProductSeen,
-  countKeywords, purgeOldProducts, backupDb, getDb,
-  setPaused, isPaused,
+  init,
+  addKeyword,
+  removeKeyword,
+  listKeywords,
+  listKeywordsWithId,
+  getKeywordByIdAndChat,
+  updateFilters,
+  getAllUserKeywords,
+  isProductSeen,
+  markProductSeen,
+  countKeywords,
+  purgeOldProducts,
+  backupDb,
+  getDb,
+  setPaused,
+  isPaused,
+  getRecentProducts,
+  getProductsCountSince,
+  getTotalProductsCount,
+  getProductsCountByKeyword,
+  getDbSize,
 };

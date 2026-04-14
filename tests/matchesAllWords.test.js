@@ -20,9 +20,10 @@ jest.mock('../src/commands', () => ({
   register: jest.fn(),
   setCheckCallback: jest.fn(),
   setStatusData: jest.fn(),
+  setRuntimeStateGetter: jest.fn(),
 }));
 jest.mock('../src/notifier', () => ({ notifyNewProducts: jest.fn() }));
-jest.mock('../src/relevanceFilter', () => ({ filterByRelevance: jest.fn(p => p) }));
+jest.mock('../src/relevanceFilter', () => ({ filterByRelevance: jest.fn((p) => p) }));
 jest.mock('node-cron', () => ({ schedule: jest.fn() }));
 
 describe('matchesAllWords', () => {

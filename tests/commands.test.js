@@ -1,12 +1,13 @@
 // Set ALLOWED_USERS before requiring commands
 process.env.ALLOWED_USERS = '6397962194,7653440251';
+process.env.ADMIN_CHAT_ID = '6397962194';
 
 const db = require('../src/db');
 
 jest.mock('../src/telegram', () => ({
   sendMessage: jest.fn(async () => {}),
   sendPhoto: jest.fn(async () => {}),
-  escapeMd: (text) => text ? String(text).replace(/([_*`\[\]])/g, '\\$1') : '',
+  escapeMd: (text) => (text ? String(text).replace(/([_*`\[\]])/g, '\\$1') : ''),
 }));
 
 const telegram = require('../src/telegram');
@@ -55,7 +56,9 @@ beforeAll(() => {
 afterAll(() => {
   const instance = db.getDb();
   if (instance) instance.close();
-  try { fs.unlinkSync(TEST_DB); } catch {};
+  try {
+    fs.unlinkSync(TEST_DB);
+  } catch {}
 });
 
 beforeEach(() => {
@@ -67,7 +70,6 @@ beforeEach(() => {
 });
 
 const commands = require('../src/commands');
-
 
 describe('Commands', () => {
   const ALLOWED = '6397962194';
@@ -371,8 +373,8 @@ describe('/filtros command', () => {
     expect(call[1]).toContain('Escolha');
     const buttons = call[2].reply_markup.inline_keyboard;
     expect(buttons).toHaveLength(2);
-    const buttonTexts = buttons.map(row => row[0].text);
-    expect(buttonTexts.some(t => t.includes('Enjoei'))).toBe(true);
+    const buttonTexts = buttons.map((row) => row[0].text);
+    expect(buttonTexts.some((t) => t.includes('Enjoei'))).toBe(true);
   });
 
   test('/filtros nike vai direto pro teclado da keyword', async () => {
@@ -568,7 +570,6 @@ describe('callback_query handler', () => {
     await bot.simulateCallback(ALLOWED, 'f:99999:used:t');
     expect(bot.answerCallbackQuery).toHaveBeenCalledWith('query-123', { text: 'Palavra-chave nao encontrada.' });
   });
-
 });
 
 describe('parsePrice', () => {
@@ -703,14 +704,16 @@ describe('formatFiltersSummary', () => {
   });
 
   test('formata multiplos filtros (enjoei)', () => {
-    const result = formatFiltersSummary({ used: true, dep: 'masculino', sz: 'g', sr: 'same_country', sort: 'price_asc' }, 'enjoei');
+    const result = formatFiltersSummary(
+      { used: true, dep: 'masculino', sz: 'g', sr: 'same_country', sort: 'price_asc' },
+      'enjoei',
+    );
     expect(result).toContain('usado');
     expect(result).toContain('masculino');
     expect(result).toContain('tam: G');
     expect(result).toContain('todo o Brasil');
     expect(result).toContain('menor preco');
   });
-
 });
 
 describe('buildFilterKeyboard', () => {
@@ -743,5 +746,161 @@ describe('buildFilterKeyboard', () => {
     expect(rows[4][1].text).toContain('\u2705'); // Todo o Brasil active
     expect(rows[5][0].text).toContain('\u2705'); // price_asc
     expect(rows[5][1].text).toContain('\u2B1C'); // price_desc off
+  });
+});
+
+describe('Dashboard commands', () => {
+  const ADMIN = '6397962194';
+  const USER = '7653440251';
+
+  beforeEach(() => {
+    const metrics = require('../src/metrics');
+    metrics.reset();
+  });
+
+  test('/stats mostra estatisticas para usuario comum', async () => {
+    db.markProductSeen({ id: 'p1', title: 'Nike', price: 'R$ 100', url: 'url1' }, 'nike', USER);
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(USER, '/stats');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('Estatisticas');
+    expect(msg).toContain('Produtos encontrados');
+  });
+
+  test('/stats admin ve API stats', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ADMIN, '/stats');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('Estatisticas');
+    expect(msg).toContain('API');
+    expect(msg).toContain('Uptime');
+  });
+
+  test('/historico sem produtos', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(USER, '/historico');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Nenhum produto');
+  });
+
+  test('/historico com produtos', async () => {
+    db.markProductSeen({ id: 'p1', title: 'Nike Air', price: 'R$ 100', url: 'url1' }, 'nike', USER);
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(USER, '/historico');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('Nike Air');
+    expect(msg).toContain('R$ 100');
+  });
+
+  test('/saude negado para nao-admin', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(USER, '/saude');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Acesso negado');
+  });
+
+  test('/saude admin ve diagnostico', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ADMIN, '/saude');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('Saude do Bot');
+    expect(msg).toContain('Cloudflare');
+    expect(msg).toContain('Memoria');
+  });
+
+  test('/atividade negado para nao-admin', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(USER, '/atividade');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Acesso negado');
+  });
+
+  test('/atividade admin sem buscas', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ADMIN, '/atividade');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Nenhuma busca');
+  });
+
+  test('/atividade admin com buscas registradas', async () => {
+    const metrics = require('../src/metrics');
+    metrics.recordSearch('nike', 'enjoei', 5, 2);
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ADMIN, '/atividade');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('nike');
+    expect(msg).toContain('5 res');
+  });
+
+  test('/config negado para nao-admin', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(USER, '/config');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Acesso negado');
+  });
+
+  test('/config admin ve configuracoes', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ADMIN, '/config');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('Configuracao');
+    expect(msg).toContain('Poll base');
+    expect(msg).toContain('Proxy');
+  });
+
+  test('/grupos negado para nao-admin', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(USER, '/grupos');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Acesso negado');
+  });
+
+  test('/resetar negado para nao-admin', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(USER, '/resetar');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('Acesso negado');
+  });
+
+  test('/resetar admin reseta cooldown', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ADMIN, '/resetar');
+    expect(telegram.sendMessage.mock.calls[0][1]).toContain('resetado');
+  });
+
+  test('/ajuda inclui novos comandos', async () => {
+    const bot = createMockBot();
+    commands.register(bot);
+    telegram.sendMessage.mockClear();
+    await bot.simulate(ADMIN, '/ajuda');
+    const msg = telegram.sendMessage.mock.calls[0][1];
+    expect(msg).toContain('/stats');
+    expect(msg).toContain('/historico');
+    expect(msg).toContain('/saude');
+    expect(msg).toContain('/atividade');
+    expect(msg).toContain('/config');
+    expect(msg).toContain('/grupos');
+    expect(msg).toContain('/resetar');
   });
 });

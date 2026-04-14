@@ -3,6 +3,7 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const cache = require('./cache');
+const metrics = require('./metrics');
 
 const GRAPHQL_URL = 'https://enjusearch.enjoei.com.br/graphql-search-x';
 const QUERY_ID = 'c5faa5f85fb47bf0beaa97b67d8a9189';
@@ -48,6 +49,7 @@ function enterCloudflareCooldown() {
   cloudflareCooldownUntil = now + cloudflareBackoffMs;
   cloudflareBackoffMs = Math.min(cloudflareBackoffMs * 2, CF_MAX_COOLDOWN_MS);
   cfBlockedGroupCount++;
+  metrics.updateCfStatus(true, cloudflareCooldownUntil, cfBlockedGroupCount);
   const retryAt = new Date(cloudflareCooldownUntil).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   throttledCfAlert(
     `Cloudflare bloqueado. Cooldown: ${Math.round(cloudflareBackoffMs / 60000)} min. Proxima tentativa: ${retryAt}.`,
@@ -60,6 +62,15 @@ function resetCloudflareBackoff() {
   }
   cloudflareBackoffMs = CF_COOLDOWN_MS;
   cfBlockedGroupCount = 0;
+  metrics.updateCfStatus(false, 0, 0);
+}
+
+function resetCloudflareCooldown() {
+  cloudflareCooldownUntil = 0;
+  cloudflareBackoffMs = CF_COOLDOWN_MS;
+  cfBlockedGroupCount = 0;
+  metrics.updateCfStatus(false, 0, 0);
+  console.log('[enjoeiApi] Cloudflare cooldown resetado manualmente.');
 }
 
 let browserId = null;
@@ -262,8 +273,10 @@ async function fetchProducts(term, filters, sinceTimestamp, useSweepDefault) {
   const cached = cache.get(cacheKey);
   if (cached) {
     console.log(`[enjoeiApi] Cache hit for "${term}"`);
+    metrics.recordCacheHit();
     return cached;
   }
+  metrics.recordCacheMiss();
 
   if (isCloudflareCooldown()) {
     console.log(`[enjoeiApi] Cloudflare cooldown ativo, pulando "${term}"`);
@@ -280,7 +293,10 @@ async function fetchProducts(term, filters, sinceTimestamp, useSweepDefault) {
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
+      const fetchStart = Date.now();
       const response = await curlFetch(url, headers);
+      metrics.recordResponseTime(Date.now() - fetchStart);
+      metrics.recordApiCall(response.status);
 
       if (response.status === 429) {
         console.warn(`[enjoeiApi] Rate limited (429) for "${term}"`);
@@ -331,6 +347,8 @@ async function fetchProducts(term, filters, sinceTimestamp, useSweepDefault) {
       return products;
     } catch (err) {
       console.error(`[enjoeiApi] Attempt ${attempt} failed for "${term}": ${err.message}`);
+      metrics.recordApiCall(0);
+      metrics.recordError(err.message);
       if (attempt < MAX_RETRIES) {
         await new Promise((r) => setTimeout(r, RETRY_BASE_MS * attempt));
       }
@@ -350,4 +368,5 @@ module.exports = {
   buildSearchParams,
   setAlertCallback,
   isCloudflareCooldown,
+  resetCloudflareCooldown,
 };

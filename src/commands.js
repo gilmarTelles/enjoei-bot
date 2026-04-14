@@ -1,14 +1,19 @@
 const db = require('./db');
 const { sendMessage } = require('./telegram');
 const { getPlatform, resolvePlatformAlias, DEFAULT_PLATFORM } = require('./platforms');
-const { parsePrice, parseFilters, sanitizeKeyword } = require('./utils');
+const { parseFilters, sanitizeKeyword } = require('./utils');
+const metrics = require('./metrics');
+const enjoeiApi = require('./enjoeiApi');
 
 const KEYWORD_MIN_LEN = 2;
 const KEYWORD_MAX_LEN = 50;
 const MAX_KEYWORDS_PER_USER = 20;
 
 function getAllowedUsers() {
-  return (process.env.ALLOWED_USERS || '').split(',').map(s => s.trim()).filter(Boolean);
+  return (process.env.ALLOWED_USERS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function isAllowed(msg) {
@@ -21,7 +26,7 @@ function isAllowedChat(chatId) {
 
 let checkCallback = null;
 let statusData = null;
-
+let getRuntimeState = null;
 
 function setCheckCallback(cb) {
   checkCallback = cb;
@@ -29,6 +34,20 @@ function setCheckCallback(cb) {
 
 function setStatusData(data) {
   statusData = data;
+}
+
+function setRuntimeStateGetter(fn) {
+  getRuntimeState = fn;
+}
+
+function isAdmin(chatId) {
+  return (process.env.ADMIN_CHAT_ID || '').split(',').includes(chatId.toString());
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
 function formatFiltersSummary(filters, platform) {
@@ -99,13 +118,15 @@ async function showKeywordSelector(bot, chatId) {
     await showFilterKeyboard(bot, chatId, keywords[0]);
     return;
   }
-  const buttons = keywords.map(k => {
+  const buttons = keywords.map((k) => {
     const platformModule = getPlatform(k.platform || DEFAULT_PLATFORM);
     const platformLabel = platformModule ? platformModule.platformName : k.platform;
-    return [{
-      text: `${k.keyword} (${platformLabel})`,
-      callback_data: `fs:${k.id}`,
-    }];
+    return [
+      {
+        text: `${k.keyword} (${platformLabel})`,
+        callback_data: `fs:${k.id}`,
+      },
+    ];
   });
   await bot.sendMessage(chatId, 'Escolha a palavra-chave:', {
     reply_markup: { inline_keyboard: buttons },
@@ -143,7 +164,10 @@ function register(bot) {
       switch (command) {
         case '/adicionar': {
           if (!arg) {
-            await sendMessage(chatId, 'Uso: /adicionar <palavra> [< preco\\_max]\nExemplo: /adicionar nike air max\nExemplo: /adicionar nike < 200');
+            await sendMessage(
+              chatId,
+              'Uso: /adicionar <palavra> [< preco\\_max]\nExemplo: /adicionar nike air max\nExemplo: /adicionar nike < 200',
+            );
             return;
           }
 
@@ -173,7 +197,10 @@ function register(bot) {
 
           const keywordCount = db.countKeywords(chatId);
           if (keywordCount >= MAX_KEYWORDS_PER_USER) {
-            await sendMessage(chatId, `Limite de ${MAX_KEYWORDS_PER_USER} palavras-chave atingido. Remova alguma antes de adicionar.`);
+            await sendMessage(
+              chatId,
+              `Limite de ${MAX_KEYWORDS_PER_USER} palavras-chave atingido. Remova alguma antes de adicionar.`,
+            );
             return;
           }
 
@@ -214,15 +241,17 @@ function register(bot) {
           if (keywords.length === 0) {
             await sendMessage(chatId, 'Nenhuma palavra-chave configurada. Use /adicionar <palavra> para comecar.');
           } else {
-            const list = keywords.map((k, i) => {
-              const platformModule = getPlatform(k.platform || DEFAULT_PLATFORM);
-              const platformLabel = platformModule ? platformModule.platformName : k.platform;
-              let line = `${i + 1}. ${k.keyword} (${platformLabel})`;
-              if (k.max_price) line += ` (max R$ ${k.max_price.toFixed(2).replace('.', ',')})`;
-              const filtersSummary = formatFiltersSummary(parseFilters(k.filters), k.platform);
-              if (filtersSummary) line += filtersSummary;
-              return line;
-            }).join('\n');
+            const list = keywords
+              .map((k, i) => {
+                const platformModule = getPlatform(k.platform || DEFAULT_PLATFORM);
+                const platformLabel = platformModule ? platformModule.platformName : k.platform;
+                let line = `${i + 1}. ${k.keyword} (${platformLabel})`;
+                if (k.max_price) line += ` (max R$ ${k.max_price.toFixed(2).replace('.', ',')})`;
+                const filtersSummary = formatFiltersSummary(parseFilters(k.filters), k.platform);
+                if (filtersSummary) line += filtersSummary;
+                return line;
+              })
+              .join('\n');
             await sendMessage(chatId, `*Suas palavras-chave:*\n\n${list}`);
           }
           break;
@@ -232,7 +261,7 @@ function register(bot) {
           if (arg) {
             const { keyword: fkw, platform: fplatform } = parsePlatformFromArg(arg);
             const keywords = db.listKeywordsWithId(chatId);
-            const match = keywords.find(k => k.keyword === fkw.toLowerCase().trim() && k.platform === fplatform);
+            const match = keywords.find((k) => k.keyword === fkw.toLowerCase().trim() && k.platform === fplatform);
             if (!match) {
               await sendMessage(chatId, `Palavra-chave "${fkw.toLowerCase()}" nao encontrada.`);
               return;
@@ -310,20 +339,198 @@ function register(bot) {
         case '/ajuda':
         case '/start':
         case '/help': {
-          await sendMessage(chatId, [
-            '*Bot de Buscas - Comandos*',
+          await sendMessage(
+            chatId,
+            [
+              '*Bot de Buscas - Comandos*',
+              '',
+              '/adicionar <palavra> — Adicionar palavra-chave',
+              '/adicionar <palavra> < preco — Com filtro de preco',
+              '/remover <palavra> — Remover palavra-chave',
+              '/listar — Ver suas palavras-chave',
+              '/filtros — Configurar filtros de busca',
+              '/buscar — Buscar agora',
+              '/parar — Pausar notificacoes',
+              '/retomar — Retomar notificacoes',
+              '/status — Status da ultima verificacao',
+              '/stats — Estatisticas do bot',
+              '/historico — Ultimos produtos encontrados',
+              '',
+              '*Admin:*',
+              '/saude — Saude e diagnostico',
+              '/atividade — Atividade recente de buscas',
+              '/config — Configuracoes do bot',
+              '/grupos — Grupos de palavras-chave',
+              '/resetar — Resetar cooldown Cloudflare',
+              '',
+              '/ajuda — Mostrar esta mensagem',
+            ].join('\n'),
+          );
+          break;
+        }
+
+        case '/stats': {
+          const isAdm = isAdmin(chatId);
+          const targetChatId = isAdm ? null : chatId;
+          const todayCount = db.getProductsCountSince(targetChatId, '-1 day');
+          const weekCount = db.getProductsCountSince(targetChatId, '-7 days');
+          const totalCount = db.getTotalProductsCount(targetChatId);
+          const stats = metrics.getStats();
+          const kwCount = db.countKeywords(chatId);
+          const lines = [
+            '*Estatisticas do Bot*',
             '',
-            '/adicionar <palavra> — Adicionar palavra-chave',
-            '/adicionar <palavra> < preco — Com filtro de preco',
-            '/remover <palavra> — Remover palavra-chave',
-            '/listar — Ver suas palavras-chave',
-            '/filtros — Configurar filtros de busca',
-            '/buscar — Buscar agora',
-            '/parar — Pausar notificacoes',
-            '/retomar — Retomar notificacoes',
-            '/status — Status da ultima verificacao',
-            '/ajuda — Mostrar esta mensagem',
-          ].join('\n'));
+            `Produtos encontrados (${isAdm ? 'geral' : 'voce'}):`,
+            `  Hoje: ${todayCount} | Semana: ${weekCount} | Total: ${totalCount}`,
+            '',
+            `Palavras-chave: ${kwCount}`,
+          ];
+          if (isAdm) {
+            lines.push(
+              '',
+              'API:',
+              `  Sucesso: ${stats.apiSuccessRate !== null ? stats.apiSuccessRate + '%' : 'N/A'} | Falhas: ${stats.apiCalls.fail} | CF: ${stats.apiCalls.cfBlock} | 429: ${stats.apiCalls.rateLimit}`,
+              `  Tempo medio: ${stats.avgResponseTime !== null ? stats.avgResponseTime + 'ms' : 'N/A'}`,
+              `  Cache hit: ${stats.cacheHitRate !== null ? stats.cacheHitRate + '%' : 'N/A'}`,
+              '',
+              `Uptime: ${stats.uptime}`,
+              `Ciclos: ${stats.pollCycles.total} (${stats.pollCycles.empty} vazios)`,
+            );
+          }
+          await sendMessage(chatId, lines.join('\n'));
+          break;
+        }
+
+        case '/historico': {
+          const recent = db.getRecentProducts(chatId, 10);
+          if (recent.length === 0) {
+            await sendMessage(chatId, 'Nenhum produto encontrado ainda.');
+          } else {
+            const lines = ['*Ultimos 10 produtos:*', ''];
+            recent.forEach((p, i) => {
+              const timeStr = p.first_seen_at || '?';
+              lines.push(`${i + 1}. ${p.title || 'Sem titulo'}`);
+              lines.push(`   ${p.price || 'N/A'} | ${timeStr} | "${p.keyword}"`);
+            });
+            await sendMessage(chatId, lines.join('\n'));
+          }
+          break;
+        }
+
+        case '/saude': {
+          if (!isAdmin(chatId)) {
+            await sendMessage(chatId, 'Acesso negado. Comando restrito ao admin.');
+            break;
+          }
+          const health = metrics.getHealth();
+          const dbSize = db.getDbSize();
+          const mem = process.memoryUsage();
+          const cfLabel = health.cfBlocked ? 'BLOQUEADO' : 'OK';
+          const cfExtra = health.cfBlocked
+            ? ` (cooldown ate ${new Date(health.cfCooldownUntil).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })})`
+            : '';
+          const rt = getRuntimeState ? getRuntimeState() : {};
+          const lines = [
+            '*Saude do Bot*',
+            '',
+            `Cloudflare: ${cfLabel}${cfExtra}`,
+            `API sucesso: ${health.apiSuccessRate !== null ? health.apiSuccessRate + '%' : 'N/A'}`,
+            `Tempo medio: ${health.avgResponseTime !== null ? health.avgResponseTime + 'ms' : 'N/A'}`,
+            `Poll: ${rt.currentPollInterval || '?'}ms (batch ${rt.batchIndex || '?'})`,
+            `Memoria: ${formatBytes(mem.heapUsed)}`,
+            `DB: ${formatBytes(dbSize)}`,
+            `Ultimo erro: ${health.lastError || 'nenhum'}${health.lastErrorTime ? ' (' + health.lastErrorTime + ')' : ''}`,
+            `Uptime: ${health.uptime}`,
+          ];
+          await sendMessage(chatId, lines.join('\n'));
+          break;
+        }
+
+        case '/atividade': {
+          if (!isAdmin(chatId)) {
+            await sendMessage(chatId, 'Acesso negado. Comando restrito ao admin.');
+            break;
+          }
+          const searches = metrics.getRecentSearches(20);
+          if (searches.length === 0) {
+            await sendMessage(chatId, 'Nenhuma busca registrada ainda.');
+          } else {
+            const lines = ['*Atividade recente:*', ''];
+            searches.forEach((s, i) => {
+              const errLabel = s.error ? ` [ERRO: ${s.error}]` : '';
+              lines.push(
+                `${i + 1}. "${s.keyword}" [${s.platform}] -> ${s.resultCount} res, ${s.newCount} novo(s)${errLabel}`,
+              );
+              lines.push(`   ${s.timestamp}`);
+            });
+            await sendMessage(chatId, lines.join('\n'));
+          }
+          break;
+        }
+
+        case '/config': {
+          if (!isAdmin(chatId)) {
+            await sendMessage(chatId, 'Acesso negado. Comando restrito ao admin.');
+            break;
+          }
+          const proxyStatus = process.env.PROXY_URL ? 'Configurado' : 'Desativado';
+          const cfSettings = [
+            `CF Cooldown: ${process.env.CF_COOLDOWN_MS || 300000}ms`,
+            `CF Max: ${process.env.CF_MAX_COOLDOWN_MS || 3600000}ms`,
+            `CF Alerta: ${process.env.CF_ALERT_THROTTLE_MS || 600000}ms`,
+          ];
+          const lines = [
+            '*Configuracao do Bot*',
+            '',
+            `Poll base: ${process.env.POLL_BASE_INTERVAL_MS || 5000}ms`,
+            `Poll max: ${process.env.POLL_MAX_INTERVAL_MS || 30000}ms`,
+            `Batch: ${process.env.POLL_BATCH_SIZE || 4}`,
+            `Concorrencia: ${process.env.MAX_CONCURRENT_SEARCHES || 5}`,
+            `Jitter: ${process.env.REQUEST_JITTER_MS || 2000}ms`,
+            `Cache TTL: ${process.env.CACHE_TTL_MS || 30000}ms`,
+            `Browser ID rotacao: ${process.env.BROWSER_ID_ROTATE_MS || 1800000}ms`,
+            `CURL: ${process.env.CURL_BIN || 'curl'}`,
+            `Proxy: ${proxyStatus}`,
+            `Filtro IA: ${process.env.ENABLE_RELEVANCE_FILTER || 'false'}`,
+            `Cidade: ${process.env.ENJOEI_CITY || 'sao-jose-dos-pinhais'}`,
+            `Estado: ${process.env.ENJOEI_STATE || 'pr'}`,
+            '',
+            ...cfSettings,
+          ];
+          await sendMessage(chatId, lines.join('\n'));
+          break;
+        }
+
+        case '/grupos': {
+          if (!isAdmin(chatId)) {
+            await sendMessage(chatId, 'Acesso negado. Comando restrito ao admin.');
+            break;
+          }
+          const rt2 = getRuntimeState ? getRuntimeState() : {};
+          const groups = rt2.allGroups || [];
+          const emptyCounts = rt2.groupEmptyCounts || new Map();
+          if (groups.length === 0) {
+            await sendMessage(chatId, 'Nenhum grupo ativo.');
+          } else {
+            const lines = [`*Grupos (${groups.length}):*`, ''];
+            groups.forEach((g, i) => {
+              const gKey = `${g.platform}||${g.keyword}||${g.filters ? JSON.stringify(g.filters) : ''}`;
+              const stale = emptyCounts.get(gKey) || 0;
+              const staleLabel = stale > 0 ? ` [stale: ${stale}]` : '';
+              lines.push(`${i + 1}. "${g.keyword}" [${g.platform}] - ${g.users.length} user(s)${staleLabel}`);
+            });
+            await sendMessage(chatId, lines.join('\n'));
+          }
+          break;
+        }
+
+        case '/resetar': {
+          if (!isAdmin(chatId)) {
+            await sendMessage(chatId, 'Acesso negado. Comando restrito ao admin.');
+            break;
+          }
+          enjoeiApi.resetCloudflareCooldown();
+          await sendMessage(chatId, 'Cloudflare cooldown resetado. Proximas buscas serao tentadas normalmente.');
           break;
         }
 
@@ -411,4 +618,11 @@ function register(bot) {
   });
 }
 
-module.exports = { register, setCheckCallback, setStatusData, formatFiltersSummary, buildFilterKeyboard };
+module.exports = {
+  register,
+  setCheckCallback,
+  setStatusData,
+  setRuntimeStateGetter,
+  formatFiltersSummary,
+  buildFilterKeyboard,
+};
