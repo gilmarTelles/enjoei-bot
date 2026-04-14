@@ -11,7 +11,28 @@ const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
 
 const PROXY_URL = process.env.PROXY_URL || '';
-const CURL_BIN = process.env.CURL_BIN || 'curl';
+
+const ALLOWED_CURL_BINS = ['/usr/bin/curl', '/usr/local/bin/curl', '/opt/homebrew/bin/curl', '/snap/bin/curl'];
+
+function resolveCurlBin() {
+  const envBin = process.env.CURL_BIN;
+  if (envBin) {
+    const resolved = path.resolve(envBin);
+    if (!ALLOWED_CURL_BINS.includes(resolved)) {
+      console.error(`[enjoeiApi] CURL_BIN "${resolved}" not in allowlist. Falling back to /usr/bin/curl.`);
+      return '/usr/bin/curl';
+    }
+    return resolved;
+  }
+  for (const candidate of ALLOWED_CURL_BINS) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {}
+  }
+  return 'curl';
+}
+
+const CURL_BIN = resolveCurlBin();
 const CITY = process.env.ENJOEI_CITY || 'sao-jose-dos-pinhais';
 const STATE = process.env.ENJOEI_STATE || 'pr';
 
@@ -244,8 +265,10 @@ function curlFetch(url, headers) {
     const args = ['-s', '-S', '--max-time', '8', '-w', '\n%{http_code}'];
 
     const proxyUrl = getProxyUrl();
+    const execEnv = { ...process.env };
     if (proxyUrl) {
-      args.push('--proxy', proxyUrl);
+      execEnv.https_proxy = proxyUrl;
+      execEnv.http_proxy = proxyUrl;
     }
 
     for (const [key, value] of Object.entries(headers)) {
@@ -254,7 +277,7 @@ function curlFetch(url, headers) {
 
     args.push(url);
 
-    execFile(CURL_BIN, args, { maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(CURL_BIN, args, { maxBuffer: 5 * 1024 * 1024, env: execEnv }, (err, stdout, stderr) => {
       if (err) {
         return reject(new Error(`${CURL_BIN} failed: ${err.message} ${stderr || ''}`));
       }
